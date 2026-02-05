@@ -246,8 +246,8 @@ setup_openclaw() {
 
             generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH"
             
-            log_info "Construindo imagem local..."
-            docker build -t openclaw:latest .
+            log_info "Baixando imagem oficial..."
+            docker pull watink/openclaw:latest
             
             log_info "Realizando deploy da Stack..."
             docker stack deploy -c docker-compose.yml -c docker-compose.swarm.yml openclaw
@@ -263,8 +263,9 @@ setup_openclaw() {
     fi
 
     # Modo Standalone (Padrão)
-    log_info "Construindo e iniciando containers (Standalone)..."
-    docker compose up -d --build
+    log_info "Baixando imagem oficial e iniciando containers (Standalone)..."
+    docker compose pull
+    docker compose up -d
     
     if [ $? -eq 0 ]; then
         log_success "OpenClaw iniciado com sucesso!"

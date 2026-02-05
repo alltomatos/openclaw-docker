@@ -1,7 +1,6 @@
 services:
   openclaw:
-    build: .
-    image: openclaw:latest
+    image: watink/openclaw:latest
     container_name: openclaw
     restart: unless-stopped
     ports:

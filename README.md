@@ -124,9 +124,9 @@ O diretório `./skills` do seu host é mapeado diretamente para dentro do contai
 ## 🐳 Desenvolvimento e Manutenção
 
 ### Construir a Imagem Localmente
-Se você fez alterações no Dockerfile:
+Se você fez alterações no Dockerfile e quer testar localmente:
 ```bash
-docker build -t openclaw:latest .
+docker build -t watink/openclaw:latest .
 ```
 
 ---
