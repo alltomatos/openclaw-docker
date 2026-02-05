@@ -311,10 +311,10 @@ enter_shell() {
         echo -e "  - ${VERDE}openclaw --help${RESET}                   : Ajuda geral do CLI"
         echo -e "  - ${VERDE}exit${RESET}                              : Sair do terminal"
         echo ""
-        echo -e "${VERDE}Acessando container...${RESET}"
+        echo -e "${VERDE}Acessando container como usuário 'openclaw'...${RESET}"
         
-        # Tenta bash, se falhar tenta sh
-        docker exec -it "$container_id" /bin/bash || docker exec -it "$container_id" /bin/sh
+        # Tenta bash, se falhar tenta sh. Força usuário openclaw para garantir permissões corretas
+        docker exec -it -u openclaw "$container_id" /bin/bash || docker exec -it -u openclaw "$container_id" /bin/sh
     else
         log_error "Nenhum container do OpenClaw encontrado em execução neste nó."
         echo -e "${AMARELO}Se estiver usando Swarm em múltiplos nós, o container pode estar em outro servidor.${RESET}"
