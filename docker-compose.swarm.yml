@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  openclaw:
+    networks:
+      - traefik_net
+    deploy:
+      mode: replicated
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.openclaw.rule=Host(`${DOMAIN:-openclaw.app.localhost}`)"
+        - "traefik.http.routers.openclaw.entrypoints=web"
+        - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
+        # Configuração TLS/HTTPS (Descomente se necessário)
+        # - "traefik.http.routers.openclaw.entrypoints=websecure"
+        # - "traefik.http.routers.openclaw.tls=true"
+        # - "traefik.http.routers.openclaw.tls.certresolver=myresolver"
+
+networks:
+  traefik_net:
+    external: true
+    name: ${TRAEFIK_NETWORK:-public}
