@@ -442,6 +442,82 @@ cleanup_vps() {
     log_success "Limpeza concluída! O OpenClaw foi removido deste servidor."
 }
 
+# --- Gerenciamento de Skills ---
+
+manage_skills() {
+    while true; do
+        header
+        echo -e "${BRANCO}Gerenciamento de Skills (Capacidades):${RESET}"
+        echo ""
+        echo -e "Diretório de Skills: ${VERDE}$INSTALL_DIR/skills${RESET}"
+        echo ""
+        echo -e "${BRANCO}Skills Instaladas:${RESET}"
+        
+        # Listar skills locais
+        if [ -d "$INSTALL_DIR/skills" ]; then
+            # Lista apenas diretórios
+            ls -F "$INSTALL_DIR/skills" | grep '/$' | sed 's/\///' | sed 's/^/  - /'
+        else
+            echo -e "  ${AMARELO}(Nenhuma skill encontrada)${RESET}"
+        fi
+        
+        echo ""
+        echo -e "${VERDE}1${BRANCO} - Instalar Nova Skill (Git URL)${RESET}"
+        echo -e "${VERDE}2${BRANCO} - Atualizar Skills Oficiais (Git Pull)${RESET}"
+        echo -e "${VERDE}3${BRANCO} - Forçar Scan/Instalação de Dependências${RESET}"
+        echo -e "${VERDE}0${BRANCO} - Voltar${RESET}"
+        echo ""
+        echo -en "${AMARELO}Opção: ${RESET}"
+        read -r OPCAO_SKILL
+        
+        case $OPCAO_SKILL in
+            1)
+                echo ""
+                echo -e "${BRANCO}Digite a URL do repositório Git da Skill:${RESET}"
+                read -r SKILL_URL
+                if [ -n "$SKILL_URL" ]; then
+                    if [ -f "$INSTALL_DIR/add_skill.sh" ]; then
+                        cd "$INSTALL_DIR" || return
+                        ./add_skill.sh "$SKILL_URL"
+                    else
+                        log_error "Script add_skill.sh não encontrado em $INSTALL_DIR."
+                    fi
+                fi
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            2)
+                log_info "Atualizando repositório oficial..."
+                if [ -d "$INSTALL_DIR" ]; then
+                    cd "$INSTALL_DIR" || return
+                    git pull
+                    log_success "Repositório atualizado. Novas skills oficiais (se houver) foram baixadas."
+                else
+                    log_error "Diretório de instalação não encontrado."
+                fi
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            3)
+                log_info "Executando Scan de Skills dentro do container..."
+                local container_id=$(docker ps --filter "name=openclaw" --format "{{.ID}}" | head -n 1)
+                if [ -n "$container_id" ]; then
+                    docker exec "$container_id" /usr/local/bin/scan_skills.sh
+                    log_success "Scan concluído."
+                else
+                    log_error "Container OpenClaw não encontrado."
+                fi
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            0)
+                return
+                ;;
+            *)
+                echo "Opção inválida."
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 # --- Menu Principal ---
 
 menu() {
@@ -453,7 +529,8 @@ menu() {
         echo -e "${VERDE}2${BRANCO} - Apenas Instalar Docker${RESET}"
         echo -e "${VERDE}3${BRANCO} - Ver Logs do OpenClaw${RESET}"
         echo -e "${VERDE}4${BRANCO} - Acessar Terminal do Container${RESET}"
-        echo -e "${VERMELHO}5${BRANCO} - Limpar VPS (Remover OpenClaw)${RESET}"
+        echo -e "${VERDE}5${BRANCO} - Gerenciar Skills (Plugins)${RESET}"
+        echo -e "${VERMELHO}6${BRANCO} - Limpar VPS (Remover OpenClaw)${RESET}"
         echo -e "${VERDE}0${BRANCO} - Sair${RESET}"
         echo ""
         echo -en "${AMARELO}Opção: ${RESET}"
@@ -504,6 +581,9 @@ menu() {
                 read -p "Pressione ENTER para continuar..."
                 ;;
             5)
+                manage_skills
+                ;;
+            6)
                 check_root
                 cleanup_vps
                 read -p "Pressione ENTER para continuar..."
