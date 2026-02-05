@@ -280,6 +280,58 @@ setup_openclaw() {
     fi
 }
 
+# --- Limpeza ---
+
+cleanup_vps() {
+    log_info "Iniciando processo de remoção do OpenClaw..."
+    echo ""
+    echo -e "${VERMELHO}!!! ATENÇÃO !!!${RESET}"
+    echo -e "Esta ação irá remover:"
+    echo -e "  - Todos os containers e stacks do OpenClaw"
+    echo -e "  - Todos os volumes de dados (configurações, workspace, histórico)"
+    echo -e "  - O diretório de instalação ($INSTALL_DIR)"
+    echo -e ""
+    echo -e "${AMARELO}O Docker Engine NÃO será removido.${RESET}"
+    echo ""
+    echo -en "${BRANCO}Tem certeza absoluta que deseja continuar? (digite 'sim' para confirmar): ${RESET}"
+    read -r CONFIRM
+
+    if [ "$CONFIRM" != "sim" ]; then
+        log_info "Operação cancelada pelo usuário."
+        return
+    fi
+
+    # 1. Remover Stack Swarm (se existir)
+    if docker stack ls | grep -q "openclaw"; then
+        log_info "Removendo stack 'openclaw' do Swarm..."
+        docker stack rm openclaw
+        # Aguarda um pouco para garantir que os containers terminem
+        log_info "Aguardando encerramento dos serviços (10s)..."
+        sleep 10
+    fi
+
+    # 2. Remover Containers Standalone (se existirem)
+    if [ -d "$INSTALL_DIR" ]; then
+        cd "$INSTALL_DIR" || return
+        if docker compose ls | grep -q "openclaw"; then
+             log_info "Parando e removendo containers Standalone..."
+             docker compose down -v --remove-orphans
+        fi
+    fi
+
+    # 3. Remover Volumes (Forçar limpeza)
+    log_info "Removendo volumes persistentes..."
+    docker volume rm openclaw_config openclaw_workspace openclaw_home 2>/dev/null || true
+
+    # 4. Remover Diretório
+    if [ -d "$INSTALL_DIR" ]; then
+        log_info "Removendo diretório de instalação: $INSTALL_DIR"
+        rm -rf "$INSTALL_DIR"
+    fi
+
+    log_success "Limpeza concluída! O OpenClaw foi removido deste servidor."
+}
+
 # --- Menu Principal ---
 
 menu() {
@@ -290,6 +342,7 @@ menu() {
         echo -e "${VERDE}1${BRANCO} - Instalar/Atualizar OpenClaw (Completo)${RESET}"
         echo -e "${VERDE}2${BRANCO} - Apenas Instalar Docker${RESET}"
         echo -e "${VERDE}3${BRANCO} - Ver Logs do OpenClaw${RESET}"
+        echo -e "${VERMELHO}4${BRANCO} - Limpar VPS (Remover OpenClaw)${RESET}"
         echo -e "${VERDE}0${BRANCO} - Sair${RESET}"
         echo ""
         echo -en "${AMARELO}Opção: ${RESET}"
@@ -317,6 +370,11 @@ menu() {
                     log_error "OpenClaw não parece estar instalado em $INSTALL_DIR"
                     read -p "Pressione ENTER para continuar..."
                 fi
+                ;;
+            4)
+                check_root
+                cleanup_vps
+                read -p "Pressione ENTER para continuar..."
                 ;;
             0)
                 exit 0
