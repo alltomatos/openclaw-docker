@@ -1,0 +1,12 @@
+module.exports = {
+  apps : [{
+    name   : "openclaw",
+    script : "openclaw",
+    args   : "gateway --port 18789",
+    cwd    : "/home/openclaw",
+    env: {
+      NODE_ENV: "production",
+      OPENCLAW_WORKSPACE: "/home/openclaw/workspace"
+    }
+  }]
+}

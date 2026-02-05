@@ -1,0 +1,29 @@
+services:
+  openclaw:
+    build: .
+    image: openclaw:latest
+    container_name: openclaw
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+    volumes:
+      # Configuração (chaves, sessões, canais) - Essencial para não perder o setup
+      - openclaw_config:/home/openclaw/.openclaw
+      # Workspace (arquivos criados pelo agente) - Separado para facilitar backup/acesso
+      - openclaw_workspace:/home/openclaw/workspace
+      # Mapeamento local de skills para instalação segura
+      - ./skills:/home/openclaw/workspace/skills
+      # [Opcional] Mapeamento para persistência total de ferramentas/browsers
+      # Descomente se quiser persistir instalações do Playwright e outros caches
+      - openclaw_home:/home/openclaw
+      # [Exemplo de Bind Mount para Windows/Host]
+      # Descomente para acessar os arquivos do workspace diretamente no seu Windows
+      # - ./workspace_data:/home/openclaw/workspace
+    environment:
+      # Define explicitamente onde o OpenClaw deve trabalhar
+      - OPENCLAW_WORKSPACE=/home/openclaw/workspace
+
+volumes:
+  openclaw_config:
+  openclaw_workspace:
+  openclaw_home:
