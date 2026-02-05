@@ -92,8 +92,11 @@ Selecione a **opção 4** no menu do `SetupOpenclaw.sh` ou entre manualmente no 
 
 > **Nota:** O terminal de manutenção abre como `root` para permitir instalações e ajustes, mas a aplicação OpenClaw roda em background como usuário seguro `openclaw` (via `gosu` no entrypoint).
 
-### 📱 Conectar WhatsApp (QR Code)
+### 📱 Canais e Configuração (Channels)
 
+Além do WhatsApp, o OpenClaw suporta diversos outros canais como Telegram, Discord, Slack, etc.
+
+#### 1. Conectar WhatsApp (QR Code)
 Para conectar o WhatsApp, você precisa gerar o QR Code diretamente no terminal do container.
 
 1.  Acesse o terminal do container (Menu opção 4 ou `docker compose exec ...`).
@@ -101,10 +104,54 @@ Para conectar o WhatsApp, você precisa gerar o QR Code diretamente no terminal 
     ```bash
     openclaw channels login --channel whatsapp
     ```
-3.  📱 **Dica:** Tenha seu celular pronto em **Aparelhos Conectados > Conectar um aparelho**, pois o código expira rápido.
+    *Dica: Use `openclaw channels login --channel whatsapp --account trabalho` para configurar múltiplas contas.*
+3.  📱 **Ação:** Tenha seu celular pronto em **Aparelhos Conectados > Conectar um aparelho**, pois o código expira rápido.
+
+#### 2. Conectar Telegram
+Para o Telegram, você precisa de um Bot Token (fale com o @BotFather).
+
+```bash
+# Adicionar token via CLI
+openclaw channels add --channel telegram --token SEU_TOKEN_AQUI
+
+# Configurar permissões de grupo
+# (Recomendado configurar no arquivo openclaw.json para maior controle)
+```
+
+#### 3. Configuração Avançada (openclaw.json)
+O arquivo de configuração principal fica em `/home/openclaw/.openclaw/openclaw.json` (dentro do volume `openclaw_config`).
+
+Exemplo de configuração segura para produção:
+
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "allowFrom": ["+5511999999999"], // Lista de permissão (DMs)
+      "groups": {
+        "*": { "requireMention": true } // Em grupos, só responde se mencionado
+      }
+    },
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "pairing", // Exige pareamento para novas conversas
+      "groups": {
+        "*": { "requireMention": true }
+      }
+    }
+  },
+  "messages": {
+    "groupChat": {
+      "mentionPatterns": ["@openclaw", "bot"] // Gatilhos de menção
+    }
+  }
+}
+```
+
+> **Dica de Mentor:** Sempre configure o `allowFrom` e `requireMention` em ambientes de produção para evitar que seu bot responda a mensagens indesejadas ou consuma tokens excessivos de LLM em grupos movimentados.
 
 **Troubleshooting:**
-Se o bot não responder imediatamente após a conexão, reinicie o serviço para carregar a nova sessão:
+Se o bot não responder imediatamente após a conexão, reinicie o gateway para carregar a nova sessão:
 ```bash
 openclaw gateway restart
 ```
