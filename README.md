@@ -150,6 +150,30 @@ Exemplo de configuração segura para produção:
 
 > **Dica de Mentor:** Sempre configure o `allowFrom` e `requireMention` em ambientes de produção para evitar que seu bot responda a mensagens indesejadas ou consuma tokens excessivos de LLM em grupos movimentados.
 
+### 🛡️ Segurança e Auditoria
+
+Se você executar `openclaw security audit --deep` e encontrar alertas como `gateway.loopback_no_auth` ou `gateway.trusted_proxies_missing`, adicione a configuração de Gateway ao seu `openclaw.json`.
+
+Isso é essencial se você expõe o OpenClaw através de um proxy reverso (como Traefik) ou quer proteger a API local.
+
+```json
+{
+  "gateway": {
+    "auth": {
+      "type": "token",
+      "token": "gere-um-token-seguro-aqui"
+    },
+    "trustedProxies": [
+      "10.0.0.0/8",     // Rede interna do Docker (Swarm/Compose)
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "127.0.0.1"
+    ]
+  },
+  // ... outras configurações (channels, messages)
+}
+```
+
 **Troubleshooting:**
 Se o bot não responder imediatamente após a conexão, reinicie o gateway para carregar a nova sessão:
 ```bash

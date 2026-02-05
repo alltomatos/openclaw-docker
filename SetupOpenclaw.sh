@@ -176,6 +176,73 @@ install_docker() {
     fi
 }
 
+setup_security_config() {
+    log_info "Verificando e aplicando configurações de segurança..."
+    
+    # Aguarda o container subir (tentativa simples)
+    sleep 5
+    
+    local container_id=$(docker ps --filter "name=openclaw" --format "{{.ID}}" | head -n 1)
+    
+    if [ -z "$container_id" ]; then
+        log_error "Container não encontrado. Configuração automática de segurança ignorada."
+        return
+    fi
+
+    # Tenta copiar config atual (se existir)
+    # Se falhar (arquivo não existe), cria um JSON vazio
+    docker cp "$container_id":/home/openclaw/.openclaw/openclaw.json ./current_config.json 2>/dev/null || echo "{}" > ./current_config.json
+
+    # Verificar se já tem gateway.auth.token configurado
+    local HAS_TOKEN=$(jq -r '.gateway.auth.token // empty' ./current_config.json 2>/dev/null)
+    
+    if [ -n "$HAS_TOKEN" ]; then
+        log_info "Configuração de segurança já existente. Mantendo atual."
+        rm -f ./current_config.json
+        return
+    fi
+
+    log_info "Gerando Token de Segurança e configurando Trusted Proxies..."
+
+    # Gerar Token
+    local NEW_TOKEN=""
+    if command -v openssl &> /dev/null; then
+        NEW_TOKEN=$(openssl rand -hex 32)
+    else
+        NEW_TOKEN=$(date +%s%N | sha256sum | head -c 64)
+    fi
+
+    # Merge/Criação com jq
+    # Adiciona auth token e trusted proxies (essencial para evitar erros de loopback_no_auth)
+    jq --arg token "$NEW_TOKEN" '
+        .gateway.auth.type = "token" |
+        .gateway.auth.token = $token |
+        .gateway.trustedProxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1"]
+    ' ./current_config.json > ./new_config.json
+    
+    # Copiar de volta para o container
+    docker cp ./new_config.json "$container_id":/home/openclaw/.openclaw/openclaw.json
+    
+    # Ajustar permissões (Root executa chown)
+    docker exec -u root "$container_id" chown openclaw:openclaw /home/openclaw/.openclaw/openclaw.json
+    docker exec -u root "$container_id" chmod 600 /home/openclaw/.openclaw/openclaw.json
+    
+    # Reiniciar para aplicar
+    log_info "Reiniciando container para carregar novas configurações..."
+    docker restart "$container_id"
+    
+    log_success "Segurança configurada com sucesso!"
+    echo ""
+    echo -e "${AZUL}================================================================${RESET}"
+    echo -e "${VERDE} TOKEN DE ACESSO GERADO (GATEWAY):${RESET}"
+    echo -e "${BRANCO} $NEW_TOKEN ${RESET}"
+    echo -e "${AZUL}================================================================${RESET}"
+    echo -e "Guarde este token. Você precisará dele para autenticar no painel ou CLI."
+    echo ""
+    
+    rm -f ./current_config.json ./new_config.json
+}
+
 # --- Instalação do OpenClaw ---
 
 setup_openclaw() {
@@ -265,6 +332,7 @@ setup_openclaw() {
             
             if [ $? -eq 0 ]; then
                 log_success "OpenClaw implantado no Swarm!"
+                setup_security_config
                 echo -e "Acesse em: ${VERDE}http://$DOMAIN${RESET}"
             else
                 log_error "Falha no deploy Swarm."
@@ -280,6 +348,7 @@ setup_openclaw() {
     
     if [ $? -eq 0 ]; then
         log_success "OpenClaw iniciado com sucesso!"
+        setup_security_config
         echo ""
         echo -e "${BRANCO}Comandos úteis:${RESET}"
         echo -e "  - Ver logs: ${VERDE}docker compose logs -f${RESET}"

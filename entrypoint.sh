@@ -19,6 +19,7 @@ fi
 # We change ownership of home directory to ensure the user can write
 # This is important because volumes mounted from host might have different permissions
 chown -R openclaw:openclaw /home/openclaw
+chmod 700 "$CONFIG_DIR"
 
 # Start cron daemon
 service cron start
