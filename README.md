@@ -7,6 +7,7 @@ Este repositório contém a configuração completa para rodar o **OpenClaw** em
 - **Base Robusta**: Ubuntu 24.04 LTS + Node.js 22.
 - **Navegadores Pré-instalados**: Chromium, Firefox e WebKit (via Playwright) prontos para uso.
 - **Gerenciamento de Processos**: Utiliza **PM2** para manter o agente sempre online.
+- **Suporte a Cluster**: Detecção automática de **Docker Swarm** e integração nativa com **Traefik** (Load Balancer).
 - **Gestão de Skills**:
   - Injeção segura de skills via diretório local.
   - **Auto-Reload Diário**: O sistema verifica novas skills automaticamente todo dia às 03:00 AM.
@@ -22,11 +23,18 @@ Este repositório contém a configuração completa para rodar o **OpenClaw** em
 - Linux/WSL2 (Recomendado).
 
 ### Opção 1: Instalação Automática (Recomendada)
-Use o script de setup interativo para configurar tudo (instalação do Docker, permissões, etc):
+Use o script de setup interativo. Ele detecta automaticamente se você está rodando em **Standalone** ou **Docker Swarm (com Traefik)** e configura tudo apropriadamente.
+
 ```bash
 chmod +x SetupOpenclaw.sh
 ./SetupOpenclaw.sh
 ```
+
+O script irá:
+1. Instalar Docker (se necessário).
+2. Detectar infraestrutura existente (Redes Swarm, Traefik).
+3. Perguntar se deseja deploy em Cluster (Alta Disponibilidade) ou Local.
+4. Configurar permissões e iniciar o agente.
 
 ### Opção 2: Instalação Manual
 1. Iniciar o Agente:
