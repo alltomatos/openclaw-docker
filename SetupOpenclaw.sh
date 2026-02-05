@@ -252,6 +252,32 @@ setup_security_config() {
     rm -f ./current_config.json ./new_config.json
 }
 
+sync_official_skills() {
+    log_info "Sincronizando skills oficiais do repositório (Pasta /skills)..."
+    
+    # Garante que estamos na raiz do projeto
+    if [ -d "$INSTALL_DIR" ]; then
+        cd "$INSTALL_DIR" || return
+        
+        # Se for um repositório git, tenta atualizar apenas a pasta skills
+        if [ -d ".git" ]; then
+            # Faz fetch do remote para garantir que temos as referências mais novas
+            git fetch origin main >/dev/null 2>&1 || true
+            
+            # Força o checkout da pasta skills do branch main
+            # Isso garante que temos os arquivos exatos do repositório oficial
+            # -- no-overlay não é suportado em git muito antigo, então usamos checkout simples pathspec
+            if git checkout origin/main -- skills/ >/dev/null 2>&1; then
+                log_success "Skills oficiais sincronizadas com sucesso."
+            else
+                log_error "Falha ao sincronizar skills oficiais. Verifique a conexão com o Git."
+            fi
+        else
+            log_info "Não é um repositório git completo. Pulando sincronização de skills oficiais."
+        fi
+    fi
+}
+
 install_initial_skills() {
     log_info "Verificando e instalando skills iniciais..."
     local container_id=$(docker ps --filter "name=openclaw" --format "{{.ID}}" | head -n 1)
@@ -360,6 +386,7 @@ setup_openclaw() {
             if [ $? -eq 0 ]; then
                 log_success "OpenClaw implantado no Swarm!"
                 setup_security_config
+                sync_official_skills
                 install_initial_skills
                 echo -e "Acesse em: ${VERDE}http://$DOMAIN${RESET}"
             else
@@ -382,6 +409,7 @@ setup_openclaw() {
     if [ $? -eq 0 ]; then
         log_success "OpenClaw iniciado com sucesso!"
         setup_security_config
+        sync_official_skills
         install_initial_skills
         echo ""
         echo -e "${BRANCO}Comandos úteis:${RESET}"
