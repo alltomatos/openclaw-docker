@@ -8,18 +8,18 @@ services:
     volumes:
       # Configuração (chaves, sessões, canais) - Mapeado para host (Padrão: ./data/config ou /root/openclaw/config)
       - ${OPENCLAW_CONFIG_PATH:-./data/config}:/home/openclaw/.openclaw
-      # Workspace (arquivos criados pelo agente)
-      - ${OPENCLAW_WORKSPACE_PATH:-./data/workspace}:/home/openclaw/workspace
       # Mapeamento local de skills para instalação segura
-      - ./skills:/home/openclaw/workspace/skills
+      - ./skills:/home/openclaw/.openclaw/workspace/skills
       # [Opcional] Mapeamento para persistência total
       # - openclaw_home:/home/openclaw
       # [Exemplo de Bind Mount para Windows/Host]
       # Descomente para acessar os arquivos do workspace diretamente no seu Windows
-      # - ./workspace_data:/home/openclaw/workspace
+      # - ./workspace_data:/home/openclaw/.openclaw/workspace
     environment:
+      # Desabilita mDNS (Bonjour) para evitar anúncios na rede (OpSec/Produção)
+      - OPENCLAW_DISABLE_BONJOUR=1
       # Define explicitamente onde o OpenClaw deve trabalhar
-      - OPENCLAW_WORKSPACE=/home/openclaw/workspace
+      # - OPENCLAW_WORKSPACE=/home/openclaw/workspace
 
 volumes:
   openclaw_home:

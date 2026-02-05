@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Configuration
-SKILLS_DIR="/home/openclaw/workspace/skills"
-LOG_FILE="/home/openclaw/workspace/skill_scan.log"
+SKILLS_DIR="/home/openclaw/.openclaw/workspace/skills"
+LOG_FILE="/home/openclaw/.openclaw/workspace/skill_scan.log"
 
 # Ensure log file exists and is writable
 touch "$LOG_FILE"

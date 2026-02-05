@@ -253,8 +253,9 @@ Para garantir que seus dados estejam seguros e acessíveis, o instalador configu
 | Volume | Caminho no Container | Caminho no Host (Produção/Setup) | Caminho Local (Dev/Manual) |
 |--------|----------------------|----------------------------------|----------------------------|
 | `openclaw_config` | `/home/openclaw/.openclaw` | `/root/openclaw/.openclaw` | `./data/config` |
-| `openclaw_workspace` | `/home/openclaw/workspace` | `/root/openclaw/workspace` | `./data/workspace` |
-| `./skills` (Bind) | `/home/openclaw/workspace/skills` | `/opt/openclaw/skills` | `./skills` |
+| `./skills` (Bind) | `/home/openclaw/.openclaw/workspace/skills` | `/opt/openclaw/skills` | `./skills` |
+
+> **Nota:** O OpenClaw armazena o workspace dentro de `.openclaw/workspace`. Por isso, apenas o volume de configuração é necessário.
 
 > **Nota:** O script `SetupOpenclaw.sh` configura permissões automáticas (`chown 1000:1000`) para que o usuário do container possa escrever nestes diretórios sem erros.
 

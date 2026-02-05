@@ -4,7 +4,7 @@ set -e
 # Define config paths
 CONFIG_DIR="/home/openclaw/.openclaw"
 CONFIG_FILE="$CONFIG_DIR/openclaw.json"
-WORKSPACE_DIR="/home/openclaw/workspace"
+WORKSPACE_DIR="$CONFIG_DIR/workspace"
 
 # Ensure directories exist
 if [ ! -d "$CONFIG_DIR" ]; then

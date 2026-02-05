@@ -78,8 +78,7 @@ prepare_persistence() {
     log_info "Configurando diretórios de persistência em /root/openclaw..."
     
     # Cria diretórios no host
-    mkdir -p /root/openclaw/.openclaw
-    mkdir -p /root/openclaw/workspace
+    mkdir -p /root/openclaw/.openclaw/workspace
     
     # Ajusta permissões para o usuário do container (UID 1000)
     # Isso evita erros de EACCES/Permission Denied
@@ -149,15 +148,16 @@ services:
         - "traefik.http.routers.openclaw.rule=Host(\`$domain\`)"
         - "traefik.http.routers.openclaw.entrypoints=web"
         - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
+    environment:
+      - OPENCLAW_DISABLE_BONJOUR=1
 $middleware_config
         # Opcional: Se usar HTTPS/TLS
         # - "traefik.http.routers.openclaw.entrypoints=websecure"
         # - "traefik.http.routers.openclaw.tls=true"
     volumes:
       - /root/openclaw/.openclaw:/home/openclaw/.openclaw
-      - /root/openclaw/workspace:/home/openclaw/workspace
       # - /root/openclaw/home:/home/openclaw
-      - ./skills:/home/openclaw/workspace/skills
+      - ./skills:/home/openclaw/.openclaw/workspace/skills
 
 networks:
   $network_name:
@@ -401,7 +401,6 @@ setup_openclaw() {
     
     # Define variáveis para o docker-compose.yml usar paths do host
     export OPENCLAW_CONFIG_PATH="/root/openclaw/.openclaw"
-    export OPENCLAW_WORKSPACE_PATH="/root/openclaw/workspace"
     
     docker compose pull
     docker compose up -d

@@ -5,8 +5,7 @@ module.exports = {
     args   : "gateway --port 18789 --allow-unconfigured",
     cwd    : "/home/openclaw",
     env: {
-      NODE_ENV: "production",
-      OPENCLAW_WORKSPACE: "/home/openclaw/workspace"
+      NODE_ENV: "production"
     }
   }]
 }
