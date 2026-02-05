@@ -152,16 +152,24 @@ Exemplo de configuração segura para produção:
 
 ### 🛡️ Segurança e Auditoria
 
-Se você executar `openclaw security audit --deep` e encontrar alertas como `gateway.loopback_no_auth` ou `gateway.trusted_proxies_missing`, adicione a configuração de Gateway ao seu `openclaw.json`.
+O **script de instalação (`SetupOpenclaw.sh`) configura a segurança automaticamente** para você. Ele gera um token único e configura os proxies confiáveis.
 
-Isso é essencial se você expõe o OpenClaw através de um proxy reverso (como Traefik) ou quer proteger a API local.
+No final da instalação, você verá:
+```text
+================================================================
+ TOKEN DE ACESSO GERADO (GATEWAY):
+ a1b2c3d4... (seu token único)
+================================================================
+```
+
+Caso precise configurar manualmente (ex: rotação de chaves), edite o `openclaw.json`:
 
 ```json
 {
   "gateway": {
     "auth": {
       "type": "token",
-      "token": "gere-um-token-seguro-aqui"
+      "token": "SEU_TOKEN_GERADO_AQUI"
     },
     "trustedProxies": [
       "10.0.0.0/8",     // Rede interna do Docker (Swarm/Compose)
