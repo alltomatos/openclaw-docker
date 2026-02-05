@@ -37,17 +37,17 @@ log() {
 }
 
 log_info() {
-    echo -e "${BEGE}[INFO] $1${RESET}"
+    echo -e "${BEGE}[INFO] $1${RESET}" >&2
     log "INFO: $1"
 }
 
 log_success() {
-    echo -e "${VERDE}[OK] $1${RESET}"
+    echo -e "${VERDE}[OK] $1${RESET}" >&2
     log "SUCCESS: $1"
 }
 
 log_error() {
-    echo -e "${VERMELHO}[ERRO] $1${RESET}"
+    echo -e "${VERMELHO}[ERRO] $1${RESET}" >&2
     log "ERROR: $1"
 }
 
@@ -73,6 +73,67 @@ check_deps() {
 }
 
 # --- Infraestrutura ---
+
+detect_swarm_traefik() {
+    log_info "Verificando ambiente Swarm e Traefik..."
+    
+    # 1. Verificar se é Swarm
+    if [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" != "active" ]; then
+        return 1
+    fi
+
+    # 2. Procurar serviço Traefik
+    # Tenta encontrar um serviço que tenha "traefik" no nome
+    local traefik_service=$(docker service ls --format '{{.Name}}' | grep "traefik" | head -n 1)
+    
+    if [ -z "$traefik_service" ]; then
+        return 1
+    fi
+
+    # 3. Descobrir a rede do Traefik
+    # Inspeciona o serviço para achar a rede
+    # O comando retorna algo como [{"Target":"network_id","Aliases":["traefik"]}]
+    # Vamos tentar pegar o nome da rede associada
+    local network_id=$(docker service inspect "$traefik_service" --format '{{range .Spec.TaskTemplate.Networks}}{{.Target}}{{end}}' | head -n 1)
+    
+    if [ -n "$network_id" ]; then
+        local network_name=$(docker network inspect "$network_id" --format '{{.Name}}')
+        log_success "Traefik detectado: Serviço=$traefik_service, Rede=$network_name"
+        echo "$network_name"
+        return 0
+    fi
+
+    return 1
+}
+
+generate_swarm_config() {
+    local network_name="$1"
+    local domain="$2"
+    
+    log_info "Gerando configuração para Swarm (Traefik na rede $network_name)..."
+    
+    cat > docker-compose.swarm.yml <<EOF
+services:
+  openclaw:
+    networks:
+      - $network_name
+    deploy:
+      mode: replicated
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.openclaw.rule=Host(\`$domain\`)"
+        - "traefik.http.routers.openclaw.entrypoints=web"
+        - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
+        # Opcional: Se usar HTTPS/TLS
+        # - "traefik.http.routers.openclaw.entrypoints=websecure"
+        # - "traefik.http.routers.openclaw.tls=true"
+
+networks:
+  $network_name:
+    external: true
+EOF
+}
 
 install_docker() {
     if ! command -v docker &> /dev/null; then
@@ -116,9 +177,44 @@ setup_openclaw() {
     chmod 777 skills # Permite escrita fácil pelo usuário e container
 
     # 3. Build & Deploy
-    log_info "Construindo e iniciando containers..."
-    docker compose up -d --build
+    
+    # Tenta detectar Traefik/Swarm
+    TRAEFIK_NET=$(detect_swarm_traefik)
+    
+    if [ -n "$TRAEFIK_NET" ]; then
+        echo ""
+        echo -e "${AMARELO}Ambiente Docker Swarm com Traefik detectado na rede: ${VERDE}$TRAEFIK_NET${RESET}"
+        echo -e "Deseja instalar o OpenClaw no modo Cluster (Swarm) integrado ao Traefik?"
+        echo -en "${BRANCO}[Y/n]: ${RESET}"
+        read -r USE_SWARM
+        
+        if [[ "$USE_SWARM" =~ ^[Yy]$ || -z "$USE_SWARM" ]]; then
+            echo -en "${BRANCO}Digite o domínio para o OpenClaw (ex: openclaw.app.localhost): ${RESET}"
+            read -r DOMAIN
+            [ -z "$DOMAIN" ] && DOMAIN="openclaw.app.localhost"
+            
+            generate_swarm_config "$TRAEFIK_NET" "$DOMAIN"
+            
+            log_info "Construindo imagem local..."
+            docker build -t openclaw:latest .
+            
+            log_info "Realizando deploy da Stack..."
+            docker stack deploy -c docker-compose.yml -c docker-compose.swarm.yml openclaw
+            
+            if [ $? -eq 0 ]; then
+                log_success "OpenClaw implantado no Swarm!"
+                echo -e "Acesse em: ${VERDE}http://$DOMAIN${RESET}"
+            else
+                log_error "Falha no deploy Swarm."
+            fi
+            return
+        fi
+    fi
 
+    # Modo Standalone (Padrão)
+    log_info "Construindo e iniciando containers (Standalone)..."
+    docker compose up -d --build
+    
     if [ $? -eq 0 ]; then
         log_success "OpenClaw iniciado com sucesso!"
         echo ""
