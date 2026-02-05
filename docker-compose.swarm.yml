@@ -2,6 +2,7 @@ version: "3.8"
 
 services:
   openclaw:
+    image: watink/openclaw:latest
     networks:
       - traefik_net
     deploy:

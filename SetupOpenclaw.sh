@@ -124,6 +124,7 @@ generate_swarm_config() {
     cat > docker-compose.swarm.yml <<EOF
 services:
   openclaw:
+    image: watink/openclaw:latest
     networks:
       - $network_name
     deploy:
