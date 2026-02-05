@@ -19,8 +19,17 @@ Este repositório contém a configuração completa para rodar o **OpenClaw** em
 
 ### Pré-requisitos
 - Docker & Docker Compose instalados.
+- Linux/WSL2 (Recomendado).
 
-### 1. Iniciar o Agente
+### Opção 1: Instalação Automática (Recomendada)
+Use o script de setup interativo para configurar tudo (instalação do Docker, permissões, etc):
+```bash
+chmod +x SetupOpenclaw.sh
+./SetupOpenclaw.sh
+```
+
+### Opção 2: Instalação Manual
+1. Iniciar o Agente:
 ```bash
 docker compose up -d
 ```
