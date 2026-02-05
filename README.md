@@ -22,19 +22,28 @@ Este repositório contém a configuração completa para rodar o **OpenClaw** em
 - Docker & Docker Compose instalados.
 - Linux/WSL2 (Recomendado).
 
-### Opção 1: Instalação Automática (Recomendada)
-Use o script de setup interativo. Ele detecta automaticamente se você está rodando em **Standalone** ou **Docker Swarm (com Traefik)** e configura tudo apropriadamente.
+### ☁️ Instalação em VPS (Produção)
+
+Para facilitar o deploy em servidores VPS (Ubuntu/Debian), criamos o **SetupOpenclaw**, um script automatizado que configura todo o ambiente utilizando Docker Swarm (opcional) e integra-se nativamente com o Traefik.
+
+✨ **O que o SetupOpenclaw faz:**
+
+*   Instala dependências (Docker, Docker Compose, Git).
+*   Configura o ambiente (Standalone ou Cluster/Swarm).
+*   Gera e implanta a Stack completa do OpenClaw.
+*   Integração automática com **Traefik** (se detectado) para Proxy Reverso e SSL.
+
+🚀 **Como usar:**
+
+Acesse seu servidor via SSH como `root` e execute o comando abaixo:
 
 ```bash
-chmod +x SetupOpenclaw.sh
-./SetupOpenclaw.sh
+curl -sL https://raw.githubusercontent.com/alltomatos/openclaw-docker/main/SetupOpenclaw.sh -o SetupOpenclaw.sh && chmod +x SetupOpenclaw.sh && ./SetupOpenclaw.sh
 ```
 
-O script irá:
-1. Instalar Docker (se necessário).
-2. Detectar infraestrutura existente (Redes Swarm, Traefik).
-3. Perguntar se deseja deploy em Cluster (Alta Disponibilidade) ou Local.
-4. Configurar permissões e iniciar o agente.
+Siga as instruções do menu interativo. O script detectará automaticamente se é necessário instalar a infraestrutura e guiará você passo-a-passo. Você poderá escolher entre o modo **Cluster (Swarm + Traefik)** ou **Standalone (Docker Puro)**.
+
+> **Nota:** Se o script detectar um cluster Swarm com Traefik, ele oferecerá a opção de configurar o OpenClaw como um serviço replicado e acessível via domínio (ex: `openclaw.app.localhost`).
 
 ### Opção 2: Instalação Manual
 1. Iniciar o Agente:
