@@ -305,6 +305,7 @@ enter_shell() {
         echo ""
         echo -e "${BRANCO}Comandos internos disponíveis no OpenClaw:${RESET}"
         echo -e "  - ${VERDE}openclaw onboard --install-daemon${RESET} : Instala o daemon do sistema"
+        echo -e "  - ${VERDE}openclaw channels login --channel whatsapp${RESET} : Gera QRCode do WhatsApp"
         echo -e "  - ${VERDE}/usr/local/bin/scan_skills.sh${RESET}     : Escaneia e instala novas skills"
         echo -e "  - ${VERDE}openclaw --help${RESET}                   : Ajuda geral do CLI"
         echo -e "  - ${VERDE}exit${RESET}                              : Sair do terminal"

@@ -92,6 +92,23 @@ Selecione a **opção 4** no menu do `SetupOpenclaw.sh` ou entre manualmente no 
 
 > **Nota:** O terminal de manutenção abre como `root` para permitir instalações e ajustes, mas a aplicação OpenClaw roda em background como usuário seguro `openclaw` (via `gosu` no entrypoint).
 
+### 📱 Conectar WhatsApp (QR Code)
+
+Para conectar o WhatsApp, você precisa gerar o QR Code diretamente no terminal do container.
+
+1.  Acesse o terminal do container (Menu opção 4 ou `docker compose exec ...`).
+2.  Execute o comando:
+    ```bash
+    openclaw channels login --channel whatsapp
+    ```
+3.  📱 **Dica:** Tenha seu celular pronto em **Aparelhos Conectados > Conectar um aparelho**, pois o código expira rápido.
+
+**Troubleshooting:**
+Se o bot não responder imediatamente após a conexão, reinicie o serviço para carregar a nova sessão:
+```bash
+openclaw gateway restart
+```
+
 ---
 
 ## 🧠 Gerenciamento de Skills
