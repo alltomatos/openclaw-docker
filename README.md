@@ -43,6 +43,13 @@ curl -sL https://raw.githubusercontent.com/alltomatos/openclaw-docker/main/Setup
 
 ![Setup OpenClaw Menu](./imagem/setup.png)
 
+O menu interativo facilita o gerenciamento do ambiente:
+1.  **Instalar/Atualizar**: Realiza o deploy completo (Standalone ou Swarm).
+2.  **Apenas Instalar Docker**: Prepara o servidor se ele estiver "zerado".
+3.  **Ver Logs**: Atalho para visualizar o que está acontecendo.
+4.  **Acessar Terminal**: Entra no container para manutenção avançada.
+5.  **Limpar VPS**: Remove tudo (útil para testes ou reset).
+
 Siga as instruções do menu interativo. O script detectará automaticamente se é necessário instalar a infraestrutura e guiará você passo-a-passo. Você poderá escolher entre o modo **Cluster (Swarm + Traefik)** ou **Standalone (Docker Puro)**.
 
 > **Nota:** Se o script detectar um cluster Swarm com Traefik, ele oferecerá a opção de configurar o OpenClaw como um serviço replicado e acessível via domínio (ex: `openclaw.app.localhost`).
@@ -70,12 +77,20 @@ docker compose up -d
 ```
 
 ### 2. Configuração Inicial (Onboarding)
-Se for a primeira vez, você precisará configurar suas chaves de API (LLM) e canais:
+Se for a primeira vez, você precisará configurar suas chaves de API (LLM) e canais.
+Você pode fazer isso de duas formas:
+
+**Opção A: Via comando direto (Host)**
 ```bash
 docker compose exec openclaw openclaw onboard
 ```
 
+**Opção B: Via Terminal Interativo**
+Selecione a **opção 4** no menu do `SetupOpenclaw.sh` ou entre manualmente no container. Ao entrar, você verá uma lista de comandos úteis:
+
 ![OpenClaw Container Terminal](./imagem/container.png)
+
+> **Nota:** O terminal de manutenção abre como `root` para permitir instalações e ajustes, mas a aplicação OpenClaw roda em background como usuário seguro `openclaw` (via `gosu` no entrypoint).
 
 ---
 
