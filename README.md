@@ -45,6 +45,22 @@ Siga as instruções do menu interativo. O script detectará automaticamente se 
 
 > **Nota:** Se o script detectar um cluster Swarm com Traefik, ele oferecerá a opção de configurar o OpenClaw como um serviço replicado e acessível via domínio (ex: `openclaw.app.localhost`).
 
+### 🔐 Segurança (Opcional)
+
+Se você estiver rodando em **Swarm com Traefik**, pode proteger o acesso ao OpenClaw com uma senha (Token).
+Edite o arquivo `docker-compose.swarm.yml` e descomente as linhas de **Basic Auth**.
+
+Para gerar o hash da senha:
+```bash
+# Instale o utilitário (se não tiver)
+sudo apt install apache2-utils
+
+# Gere o hash (substitua 'seu_token' pela senha desejada)
+htpasswd -nb admin seu_token
+# Saída: admin:$apr1$.......
+```
+Copie a saída e cole na label `traefik.http.middlewares.openclaw-auth.basicauth.users` no arquivo `docker-compose.swarm.yml`.
+
 ### Opção 2: Instalação Manual
 1. Iniciar o Agente:
 ```bash
