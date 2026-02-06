@@ -1282,6 +1282,28 @@ run_wizard() {
     if [ $? -eq 0 ]; then
         log_success "Wizard concluído com sucesso."
         
+        # --- FIX: Forçar Bind LAN no openclaw.json ---
+        # O Wizard gera o arquivo com bind="loopback" por padrão.
+        # Ajustamos para "lan" para garantir acesso externo (Traefik/Rede).
+        if [ -f "/root/openclaw/.openclaw/openclaw.json" ]; then
+             log_info "Forçando bind='lan' no openclaw.json..."
+             local tmp_json=$(mktemp)
+             # Verifica se jq está disponível
+             if command -v jq &> /dev/null; then
+                 jq '.gateway.bind = "lan"' "/root/openclaw/.openclaw/openclaw.json" > "$tmp_json"
+                 if [ -s "$tmp_json" ]; then
+                     mv "$tmp_json" "/root/openclaw/.openclaw/openclaw.json"
+                     chown 1000:1000 "/root/openclaw/.openclaw/openclaw.json"
+                     log_success "Configuração de bind atualizada para LAN."
+                 else
+                     log_warn "Falha ao atualizar openclaw.json (saída vazia)."
+                 fi
+             else
+                 log_warn "jq não encontrado. Não foi possível ajustar o bind no arquivo json."
+             fi
+             rm -f "$tmp_json"
+        fi
+
         # Ler novo token gerado pelo Wizard
         local new_token=""
         if [ -f "/root/openclaw/.openclaw/openclaw.json" ]; then
