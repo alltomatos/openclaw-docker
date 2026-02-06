@@ -77,7 +77,7 @@ ensure_docker_permission() {
 }
 
 check_deps() {
-    log_info "Atualizando repositórios e sistema (SetupOrion Logic)..."
+    log_info "Atualizando repositórios e sistema..."
     apt-get update -qq >/dev/null 2>&1
     # Upgrade silencioso para garantir patches de segurança, como no SetupOrion
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq >/dev/null 2>&1 || log_info "Upgrade de sistema pulado ou finalizado com avisos."
