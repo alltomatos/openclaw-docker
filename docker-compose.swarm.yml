@@ -18,7 +18,6 @@ services:
         # Exemplo (admin:token123):
         - "traefik.http.middlewares.openclaw-auth.basicauth.users=admin:$$apr1$$9k6o0...$$..."
         - "traefik.http.routers.openclaw.middlewares=openclaw-auth"
-
         # Configuração TLS/HTTPS (Descomente se necessário)
         # - "traefik.http.routers.openclaw.entrypoints=websecure"
         # - "traefik.http.routers.openclaw.tls=true"
@@ -27,7 +26,6 @@ services:
       - openclaw_config:/home/openclaw/.openclaw
       - openclaw_workspace:/home/openclaw/workspace
       - openclaw_home:/home/openclaw
-      - ./skills:/home/openclaw/workspace/skills
 
 networks:
   traefik_net:
@@ -36,5 +34,8 @@ networks:
 
 volumes:
   openclaw_config:
+    external: true
   openclaw_workspace:
+    external: true
   openclaw_home:
+    external: true

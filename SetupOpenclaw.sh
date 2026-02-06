@@ -18,6 +18,61 @@ BEGE="\e[93m"
 AZUL="\e[34m"
 RESET="\e[0m"
 
+# Variáveis Globais de Armazenamento
+STORAGE_MODE="host" # host | volume
+VOLUME_NAME="openclaw_data"
+
+# --- Helpers de Armazenamento ---
+
+# Verifica se um arquivo de configuração existe
+# $1: Caminho relativo dentro do config (ex: openclaw.json)
+check_config_exists() {
+    local file="$1"
+    if [ "$STORAGE_MODE" = "volume" ]; then
+        docker run --rm -v "$VOLUME_NAME:/data" alpine test -f "/data/$file"
+        return $?
+    else
+        test -f "/root/openclaw/.openclaw/$file"
+        return $?
+    fi
+}
+
+# Lê conteúdo de um arquivo de configuração
+# $1: Caminho relativo dentro do config
+cat_config() {
+    local file="$1"
+    if [ "$STORAGE_MODE" = "volume" ]; then
+        docker run --rm -v "$VOLUME_NAME:/data" alpine cat "/data/$file" 2>/dev/null
+    else
+        cat "/root/openclaw/.openclaw/$file" 2>/dev/null
+    fi
+}
+
+# Escreve conteúdo em um arquivo de configuração (lê do stdin)
+# $1: Caminho relativo dentro do config
+write_config() {
+    local file="$1"
+    if [ "$STORAGE_MODE" = "volume" ]; then
+        # Usa sh -c para redirecionamento dentro do container
+        docker run --rm -i -v "$VOLUME_NAME:/data" alpine sh -c "cat > /data/$file && chown 1000:1000 /data/$file"
+    else
+        local full_path="/root/openclaw/.openclaw/$file"
+        mkdir -p "$(dirname "$full_path")"
+        cat > "$full_path"
+        chown 1000:1000 "$full_path"
+    fi
+}
+
+# Garante que o volume exista (se modo volume)
+ensure_volume_exists() {
+    if [ "$STORAGE_MODE" = "volume" ]; then
+        if ! docker volume ls -q | grep -q "^${VOLUME_NAME}$"; then
+            log_info "Criando volume Docker: $VOLUME_NAME"
+            docker volume create "$VOLUME_NAME"
+        fi
+    fi
+}
+
 # --- Funções Visuais e Logs ---
 
 header() {
@@ -108,16 +163,25 @@ check_deps() {
 # --- Infraestrutura ---
 
 prepare_persistence() {
-    log_info "Configurando diretórios de persistência em /root/openclaw..."
-    
-    # Cria diretórios no host
-    mkdir -p /root/openclaw/.openclaw/workspace
-    
-    # Ajusta permissões para o usuário do container (UID 1000)
-    # Isso evita erros de EACCES/Permission Denied
-    chown -R 1000:1000 /root/openclaw
-    
-    log_success "Diretórios de persistência prontos."
+    if [ "$STORAGE_MODE" = "volume" ]; then
+        log_info "Configurando volume de persistência Docker: $VOLUME_NAME..."
+        ensure_volume_exists
+        # Configura permissões e estrutura básica dentro do volume
+        # mkdir -p garante que a estrutura exista
+        docker run --rm -v "$VOLUME_NAME:/data" alpine sh -c "mkdir -p /data/workspace/skills && chown -R 1000:1000 /data"
+        log_success "Volume $VOLUME_NAME pronto e configurado."
+    else
+        log_info "Configurando diretórios de persistência em /root/openclaw..."
+        
+        # Cria diretórios no host
+        mkdir -p /root/openclaw/.openclaw/workspace/skills
+        
+        # Ajusta permissões para o usuário do container (UID 1000)
+        # Isso evita erros de EACCES/Permission Denied
+        chown -R 1000:1000 /root/openclaw
+        
+        log_success "Diretórios de persistência prontos."
+    fi
 }
 
 update_dashboard_link() {
@@ -207,11 +271,21 @@ services:
     # Permite iniciar sem config para rodar o onboard depois
     command: ["openclaw", "gateway", "--allow-unconfigured"]
     volumes:
-      # Mapeamento direto para persistência no host
-      - /root/openclaw/.openclaw:/home/openclaw/.openclaw
+      # Persistência via Volumes Nomeados (Padrão Swarm-Native)
+      - openclaw_config:/home/openclaw/.openclaw
+      - openclaw_workspace:/home/openclaw/workspace
+      - openclaw_home:/home/openclaw
       # Socket do Docker para Sandboxing
       - /var/run/docker.sock:/var/run/docker.sock
 $middleware_config
+
+volumes:
+  openclaw_config:
+    external: true
+  openclaw_workspace:
+    external: true
+  openclaw_home:
+    external: true
 
 networks:
   $network_name:
