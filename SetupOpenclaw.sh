@@ -160,6 +160,129 @@ check_deps() {
     log_success "Dependências verificadas."
 }
 
+setup_hostname() {
+    header
+    echo -e "${AZUL}=== Configuração Inicial ===${RESET}"
+    echo ""
+    current_hostname=$(hostname)
+    echo -e "${BRANCO}Hostname atual: ${VERDE}$current_hostname${RESET}"
+    echo ""
+    echo -en "${BRANCO}Deseja alterar o hostname? [y/N]: ${RESET}"
+    read -r CHANGE_HOST
+    
+    if [[ "$CHANGE_HOST" =~ ^[Yy]$ ]]; then
+        echo -en "${BRANCO}Digite o novo hostname: ${RESET}"
+        read -r NEW_HOSTNAME
+        if [ -n "$NEW_HOSTNAME" ]; then
+            hostnamectl set-hostname "$NEW_HOSTNAME"
+            # Atualiza hosts
+            if grep -q "127.0.0.1" /etc/hosts; then
+                 sed -i "s/127.0.0.1.*/127.0.0.1 localhost $NEW_HOSTNAME/" /etc/hosts
+            else
+                 echo "127.0.0.1 $NEW_HOSTNAME" >> /etc/hosts
+            fi
+            log_success "Hostname alterado para $NEW_HOSTNAME"
+        else
+            log_error "Hostname inválido."
+        fi
+    fi
+    
+    # Garante diretório de persistência central
+    if [ ! -d "/root/dados_vps" ]; then
+        log_info "Criando diretório de persistência /root/dados_vps..."
+        mkdir -p /root/dados_vps
+    fi
+}
+
+install_portainer_standalone() {
+    log_info "Instalando Portainer Standalone..."
+    docker run -d -p 9000:9000 -p 9443:9443 --name portainer \
+        --restart=always \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v portainer_data:/data \
+        portainer/portainer-ce:latest
+        
+    if [ $? -eq 0 ]; then
+        log_success "Portainer instalado com sucesso!"
+        local ip_addr=$(hostname -I | awk '{print $1}')
+        echo -e "${AMARELO}Acesse: https://$ip_addr:9443${RESET}"
+        
+        # Salvar info em dados_vps
+        echo "Portainer URL: https://$ip_addr:9443" > /root/dados_vps/dados_portainer.txt
+        echo "Portainer Installed: $(date)" >> /root/dados_vps/dados_portainer.txt
+    else
+        log_error "Falha ao instalar Portainer."
+    fi
+}
+
+generate_infra_config() {
+    local network_name="$1"
+    local email_ssl="$2"
+    
+    # Garante que a rede externa exista
+    docker network create --driver overlay --attachable "$network_name" 2>/dev/null || true
+    
+    cat <<EOF > docker-compose.infra.yml
+version: '3.8'
+
+networks:
+  $network_name:
+    external: true
+
+volumes:
+  portainer_data:
+  letsencrypt_data:
+
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencryptresolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencryptresolver.acme.email=$email_ssl"
+      - "--certificatesresolvers.letsencryptresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "letsencrypt_data:/letsencrypt"
+    networks:
+      - $network_name
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    command: -H unix:///var/run/docker.sock
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "portainer_data:/data"
+    networks:
+      - $network_name
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.portainer.rule=Host(\`portainer.localhost\`)"
+        - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+EOF
+}
+
 # --- Infraestrutura ---
 
 prepare_persistence() {
@@ -299,11 +422,8 @@ $middleware_config
 
 volumes:
   openclaw_config:
-    external: true
   openclaw_workspace:
-    external: true
   openclaw_home:
-    external: true
 
 networks:
   $network_name:
@@ -546,6 +666,39 @@ wait_stack() {
         sleep 30
         echo -n "."
     done
+}
+
+check_service_health() {
+    local service_name="$1"
+    local desired_replicas="${2:-1}"
+    local timeout="${3:-300}" # 5 minutes default
+    local interval=10
+    local elapsed=0
+
+    log_info "Monitorando saúde do serviço $service_name (Meta: $desired_replicas/$desired_replicas)..."
+
+    while [ $elapsed -lt $timeout ]; do
+        # Verifica réplicas (Running / Desired)
+        # Formato {{.Replicas}} retorna algo como "1/1"
+        local replicas=$(docker service ls --filter "name=$service_name" --format "{{.Replicas}}")
+        
+        if [[ "$replicas" == "$desired_replicas/$desired_replicas" ]]; then
+            echo ""
+            log_success "Serviço $service_name estabilizado em $replicas!"
+            return 0
+        fi
+        
+        # Verifica se falhou (0/1 por muito tempo)
+        sleep $interval
+        elapsed=$((elapsed + interval))
+        echo -n "."
+    done
+
+    echo ""
+    log_error "Timeout aguardando serviço $service_name ficar saudável."
+    log_info "Logs recentes do serviço:"
+    docker service logs --tail 20 "$service_name"
+    return 1
 }
 
 deploy_stack_via_api() {
@@ -963,31 +1116,71 @@ EOF
         log_success "Dados de acesso salvos em /root/dados_vps/dados_portainer.txt"
     fi
     
-    # 8. Deploy OpenClaw
+    # 8. Finalização da Infraestrutura
     echo ""
-    echo -e "${AZUL}=== Instalação do OpenClaw ===${RESET}"
-    
-    # Usar a função setup_openclaw mas forçando o modo swarm
-    # Como setup_openclaw é interativo, vamos chamar a lógica de deploy direto aqui
-    # ou podemos chamar setup_openclaw e o usuário escolhe Swarm (que já vai ser detectado!)
-    
-    log_info "Continuando para instalação do OpenClaw..."
+    log_success "Infraestrutura Swarm configurada com sucesso!"
+    echo -e "${BRANCO}O ambiente está pronto para receber o OpenClaw.${RESET}"
+    echo -e "${AMARELO}Retorne ao menu e selecione a Opção 2 para realizar o Deploy da Aplicação.${RESET}"
     
     # Limpeza do diretório temporário
     cd "$CURRENT_DIR" || true
     rm -rf "$TEMP_SETUP_DIR"
-
-    setup_openclaw
 }
 
-# --- Instalação do OpenClaw ---
+# --- Instalação do OpenClaw (Smart Deploy) ---
 
 setup_openclaw() {
-    log_info "Iniciando configuração do OpenClaw..."
-
-    # 1. Preparar Diretório
+    log_info "Iniciando Smart Deploy do OpenClaw..."
+    
+    # --- Passo A: Validação de Pré-requisitos (Smart Check) ---
+    log_info "Verificando pré-requisitos de infraestrutura..."
+    local error_found=false
+    
+    # 1. Docker
+    if ! command -v docker &> /dev/null; then
+        log_error "Docker não encontrado."
+        error_found=true
+    fi
+    
+    # 2. Persistência Central (/root/dados_vps)
+    # No modo Standalone pode não ter dados_vps populado com portainer, mas deve existir se foi rodado o menu 1
+    # Mas se o usuário rodou menu 1 standalone, deve ter criado.
+    # Vamos ser flexíveis: se não existir, criamos, mas avisamos.
+    if [ ! -d "/root/dados_vps" ]; then
+         log_warn "Diretório /root/dados_vps não encontrado."
+         # Não é erro fatal para standalone, mas é suspeito.
+    fi
+    
+    # 3. Portainer (Verifica se algum container portainer está rodando)
+    if ! docker ps --format '{{.Names}}' | grep -q "portainer"; then
+         # Verifica se é service (Swarm)
+         if ! docker service ls --format '{{.Name}}' | grep -q "portainer"; then
+             log_error "Portainer não detectado (Container ou Serviço)."
+             error_found=true
+         fi
+    fi
+    
+    if [ "$error_found" = true ]; then
+        echo ""
+        echo -e "${VERMELHO}⚠️  Erro: Infraestrutura não detectada ou incompleta.${RESET}"
+        echo -e "${BRANCO}Por favor, execute a ${VERDE}Opção 1 (Instalação & Setup)${BRANCO} primeiro.${RESET}"
+        return
+    fi
+    
+    log_success "Infraestrutura validada."
+    
+    # --- Passo B: Detecção de Modo ---
+    local DEPLOY_MODE="standalone"
+    if [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" == "active" ]; then
+        DEPLOY_MODE="swarm"
+        log_info "Modo detectado: SWARM"
+    else
+        log_info "Modo detectado: STANDALONE"
+    fi
+    
+    # Preparar repositório
     if [ -d "$INSTALL_DIR" ]; then
-        log_info "Diretório $INSTALL_DIR já existe. Atualizando repositório..."
+        log_info "Atualizando repositório em $INSTALL_DIR..."
         cd "$INSTALL_DIR" || exit
         git pull
     else
@@ -995,206 +1188,161 @@ setup_openclaw() {
         git clone "$REPO_URL" "$INSTALL_DIR"
         cd "$INSTALL_DIR" || exit
     fi
-
-    # 2. Configurar Permissões
+    
+    # Configurar permissões básicas
     chmod +x *.sh
     mkdir -p skills
-    chmod 777 skills # Permite escrita fácil pelo usuário e container
-
-    # 3. Build & Deploy
-    
-    # Preparar persistência (diretórios no host)
+    chmod 777 skills
     prepare_persistence
-    
-    # FIX: Corrigir permissões de propriedade para o usuário openclaw (UID 1000)
-    # Isso resolve erros como "EACCES: permission denied, watch '/home/openclaw/.openclaw'"
-    log_info "Ajustando permissões de propriedade (chown 1000:1000) em /root/openclaw..."
+    # Ajuste de permissões
     chown -R 1000:1000 /root/openclaw
-    
-    # Copiar skills iniciais para a persistência (evita montar volume nested/circular)
+
+    # Copiar skills iniciais
     if [ -d "skills" ]; then
-        log_info "Copiando skills iniciais para o workspace..."
         mkdir -p /root/openclaw/.openclaw/workspace/skills
         cp -rn skills/* /root/openclaw/.openclaw/workspace/skills/ 2>/dev/null || true
-        # Garante permissões corretas
         chown -R 1000:1000 /root/openclaw/.openclaw/workspace/skills
     fi
 
-    # Tenta detectar Traefik/Swarm
-    TRAEFIK_NET=$(detect_swarm_traefik)
+    # --- Passo C: Deploy ---
     
-    if [ -n "$TRAEFIK_NET" ]; then
-        echo ""
-        echo -e "${AMARELO}Ambiente Docker Swarm com Traefik detectado na rede: ${VERDE}$TRAEFIK_NET${RESET}"
-        echo -e "Deseja instalar o OpenClaw no modo Cluster (Swarm) integrado ao Traefik?"
-        echo -en "${BRANCO}[Y/n]: ${RESET}"
-        read -r USE_SWARM
+    if [ "$DEPLOY_MODE" == "swarm" ]; then
+        # === DEPLOY SWARM ===
         
-        if [[ "$USE_SWARM" =~ ^[Yy]$ || -z "$USE_SWARM" ]]; then
-            echo -en "${BRANCO}Digite o domínio para o OpenClaw (ex: openclaw.app.localhost): ${RESET}"
-            read -r DOMAIN
-            [ -z "$DOMAIN" ] && DOMAIN="openclaw.app.localhost"
-            
-            # Sugere domínio do canvas baseado no domínio principal
-            local default_canvas_domain=""
-            if [[ "$DOMAIN" == openclaw.* ]]; then
-                default_canvas_domain="${DOMAIN/openclaw./canvas.}"
-            else
-                default_canvas_domain="canvas.$DOMAIN"
-            fi
-            
-            echo -en "${BRANCO}Digite o domínio para o Canvas (ex: $default_canvas_domain): ${RESET}"
-            read -r CANVAS_DOMAIN
-            [ -z "$CANVAS_DOMAIN" ] && CANVAS_DOMAIN="$default_canvas_domain"
-            
-            # --- Autenticação ---
-            # Token não será gerado aqui, deixaremos o Wizard (onboard) criar.
-            local GEN_TOKEN=""
-            # if command -v openssl &> /dev/null; then
-            #    GEN_TOKEN=$(openssl rand -hex 16)
-            # else
-            #    GEN_TOKEN=$(date +%s%N | sha256sum | base64 | head -c 32)
-            # fi
-
-            local AUTH_HASH=""
-            echo ""
-            echo -e "Deseja proteger o acesso com senha (Basic Auth)?"
-            echo -en "${BRANCO}[Y/n]: ${RESET}"
-            read -r ENABLE_AUTH
-            
-            if [[ "$ENABLE_AUTH" =~ ^[Yy]$ || -z "$ENABLE_AUTH" ]]; then
-                echo -en "${BRANCO}Usuário (default: admin): ${RESET}"
-                read -r AUTH_USER
-                [ -z "$AUTH_USER" ] && AUTH_USER="admin"
-                
-                echo -en "${BRANCO}Senha: ${RESET}"
-                read -rs AUTH_PASS
-                echo ""
-                
-                log_info "Gerando hash de senha..."
-                # Tenta usar htpasswd via docker (httpd:alpine) - imagem leve ~5MB
-                # Se falhar (ex: sem internet para pull), tenta python ou avisa
-                AUTH_HASH=$(docker run --rm --entrypoint htpasswd httpd:alpine -nb "$AUTH_USER" "$AUTH_PASS" 2>/dev/null)
-                
-                if [ -z "$AUTH_HASH" ]; then
-                     # Fallback para Python (se disponível no host)
-                     if command -v python3 &>/dev/null; then
-                         # Gera MD5 crypt (comum em linux)
-                         local pass_hash=$(python3 -c "import crypt; print(crypt.crypt('$AUTH_PASS', crypt.mksalt(crypt.METHOD_MD5)))" 2>/dev/null)
-                         if [ -n "$pass_hash" ]; then
-                            AUTH_HASH="$AUTH_USER:$pass_hash"
-                         fi
-                     fi
-                fi
-
-                if [ -n "$AUTH_HASH" ]; then
-                    log_success "Hash gerado com sucesso!"
-                    echo -e "Credenciais: ${VERDE}$AUTH_USER${RESET} / ${VERDE}******${RESET}"
-                    
-                    # Salvar credenciais Swarm
-                    mkdir -p /root/dados_vps
-                    echo "" >> /root/dados_vps/openclaw.txt
-                    echo " ACESSO WEB (SWARM):" >> /root/dados_vps/openclaw.txt
-                    echo " URL: http://$DOMAIN" >> /root/dados_vps/openclaw.txt
-                    echo " CANVAS URL: http://$CANVAS_DOMAIN" >> /root/dados_vps/openclaw.txt
-                    echo " USER: $AUTH_USER" >> /root/dados_vps/openclaw.txt
-                    echo " PASS: $AUTH_PASS" >> /root/dados_vps/openclaw.txt
-                    echo " NETWORK: $TRAEFIK_NET" >> /root/dados_vps/openclaw.txt
-                    chmod 600 /root/dados_vps/openclaw.txt
-                else
-                    log_error "Não foi possível gerar o hash (requer internet para baixar httpd:alpine ou python3 local)."
-                    echo -e "${AMARELO}A instalação continuará sem autenticação.${RESET}"
-                fi
-            fi
-            
-            # Salvar Token para referência (Swarm)
-            mkdir -p /root/dados_vps
-            if [ ! -f /root/dados_vps/openclaw.txt ]; then
-                 echo "================================================================" > /root/dados_vps/openclaw.txt
-                 echo " DATA DE INSTALAÇÃO: $(date)" >> /root/dados_vps/openclaw.txt
-                 echo "================================================================" >> /root/dados_vps/openclaw.txt
-            fi
-            
-            # Não salvamos o GEN_TOKEN como token final pois o Wizard irá sobrescrever
-            
-            # Garantir que a rede esteja salva (caso não tenha entrado no bloco de auth)
-            if ! grep -q "NETWORK:" /root/dados_vps/openclaw.txt 2>/dev/null; then
-                echo " NETWORK: $TRAEFIK_NET" >> /root/dados_vps/openclaw.txt
-            fi
-            
-            chmod 600 /root/dados_vps/openclaw.txt
-
-            # Passamos token vazio para iniciar sem configuração e permitir onboard
-            generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH" "" "$CANVAS_DOMAIN"
-            
-            log_info "Baixando imagem oficial..."
-            if ! docker pull watink/openclaw:latest; then
-                log_error "Falha ao baixar imagem watink/openclaw:latest."
-                echo -e "${AMARELO}Tentando construir localmente como fallback...${RESET}"
-                build_image
-            fi
-            
-            log_info "Realizando deploy da Stack..."
-            # Usa APENAS o arquivo Swarm gerado (que agora é completo), evitando conflitos com 'profiles' do docker-compose.yml
-            deploy_stack_via_api "openclaw" "docker-compose.swarm.yml"
-            
-            if [ $? -eq 0 ]; then
-                log_success "OpenClaw implantado no Swarm!"
-                sync_official_skills
-                install_initial_skills
-                
-                echo ""
-                echo -e "${AMARELO}IMPORTANTE: Instalação da Stack concluída.${RESET}"
-                echo -e "${BRANCO}Iniciando agora o Wizard de Configuração Oficial (Obrigatório)...${RESET}"
-                echo ""
-                sleep 2
-                
-                setup_sandbox
-                run_wizard
-            else
-                log_error "Falha no deploy Swarm."
-            fi
+        # Recuperar Rede Traefik
+        local TRAEFIK_NET=$(detect_swarm_traefik)
+        if [ -z "$TRAEFIK_NET" ]; then
+            log_error "Swarm ativo, mas Traefik não detectado. Execute a Opção 1 (Swarm) novamente."
             return
         fi
-    fi
-
-    # Modo Standalone (Padrão)
-    log_info "Baixando imagem oficial e iniciando containers (Standalone)..."
-    
-    # Não geramos token temporário, deixamos o Wizard criar.
-    GEN_TOKEN=""
-    # if [ -z "$GEN_TOKEN" ]; then
-    #    if command -v openssl &> /dev/null; then
-    #        GEN_TOKEN=$(openssl rand -hex 16)
-    #    else
-    #        GEN_TOKEN=$(date +%s%N | sha256sum | base64 | head -c 32)
-    #    fi
-    # fi
-
-    # Define variáveis para o docker-compose.yml usar paths do host
-    # export OPENCLAW_GATEWAY_TOKEN="$GEN_TOKEN"
-    unset OPENCLAW_GATEWAY_TOKEN
-    export OPENCLAW_CONFIG_PATH="/root/openclaw/.openclaw"
-    export TZ="America/Sao_Paulo"
-    export NODE_ENV="production"
-    
-    docker compose pull
-    docker compose up -d
-    
-    if [ $? -eq 0 ]; then
-        log_success "OpenClaw iniciado com sucesso!"
-        sync_official_skills
-        install_initial_skills
-        echo ""
-        echo -e "${AMARELO}IMPORTANTE: Containers iniciados.${RESET}"
-        echo -e "${BRANCO}Iniciando agora o Wizard de Configuração Oficial (Obrigatório)...${RESET}"
-        echo ""
-        sleep 2
         
-        setup_sandbox
-        run_wizard
+        echo -en "${BRANCO}Digite o domínio para o OpenClaw (ex: openclaw.app.localhost): ${RESET}"
+        read -r DOMAIN
+        [ -z "$DOMAIN" ] && DOMAIN="openclaw.app.localhost"
+        
+        # Sugere domínio do canvas
+        local default_canvas_domain=""
+        if [[ "$DOMAIN" == openclaw.* ]]; then
+            default_canvas_domain="${DOMAIN/openclaw./canvas.}"
+        else
+            default_canvas_domain="canvas.$DOMAIN"
+        fi
+        
+        echo -en "${BRANCO}Digite o domínio para o Canvas (ex: $default_canvas_domain): ${RESET}"
+        read -r CANVAS_DOMAIN
+        [ -z "$CANVAS_DOMAIN" ] && CANVAS_DOMAIN="$default_canvas_domain"
+        
+        # Autenticação Opcional (Basic Auth no Traefik)
+        local AUTH_HASH=""
+        echo ""
+        echo -e "Deseja proteger o acesso com senha (Basic Auth)?"
+        echo -en "${BRANCO}[Y/n]: ${RESET}"
+        read -r ENABLE_AUTH
+        
+        local AUTH_USER=""
+        local AUTH_PASS=""
+        
+        if [[ "$ENABLE_AUTH" =~ ^[Yy]$ || -z "$ENABLE_AUTH" ]]; then
+            echo -en "${BRANCO}Usuário (default: admin): ${RESET}"
+            read -r AUTH_USER
+            [ -z "$AUTH_USER" ] && AUTH_USER="admin"
+            
+            echo -en "${BRANCO}Senha: ${RESET}"
+            read -rs AUTH_PASS
+            echo ""
+            
+            log_info "Gerando hash de senha..."
+            AUTH_HASH=$(docker run --rm --entrypoint htpasswd httpd:alpine -nb "$AUTH_USER" "$AUTH_PASS" 2>/dev/null)
+            
+            if [ -z "$AUTH_HASH" ] && command -v python3 &>/dev/null; then
+                 local pass_hash=$(python3 -c "import crypt; print(crypt.crypt('$AUTH_PASS', crypt.mksalt(crypt.METHOD_MD5)))" 2>/dev/null)
+                 [ -n "$pass_hash" ] && AUTH_HASH="$AUTH_USER:$pass_hash"
+            fi
+            
+            if [ -n "$AUTH_HASH" ]; then
+                # Salvar credenciais
+                mkdir -p /root/dados_vps
+                echo "" >> /root/dados_vps/openclaw.txt
+                echo " ACESSO WEB (SWARM):" >> /root/dados_vps/openclaw.txt
+                echo " URL: http://$DOMAIN" >> /root/dados_vps/openclaw.txt
+                echo " CANVAS URL: http://$CANVAS_DOMAIN" >> /root/dados_vps/openclaw.txt
+                echo " USER: $AUTH_USER" >> /root/dados_vps/openclaw.txt
+                echo " PASS: $AUTH_PASS" >> /root/dados_vps/openclaw.txt
+                echo " NETWORK: $TRAEFIK_NET" >> /root/dados_vps/openclaw.txt
+                chmod 600 /root/dados_vps/openclaw.txt
+            fi
+        fi
+        
+        # Token será gerado pelo Wizard, passamos vazio por enquanto
+        generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH" "" "$CANVAS_DOMAIN"
+        
+        log_info "Baixando imagem oficial..."
+        docker pull watink/openclaw:latest || build_image
+        
+        log_info "Realizando deploy da Stack via Portainer API..."
+        deploy_stack_via_api "openclaw" "docker-compose.swarm.yml"
+        
+        # --- Sincronia e Health Check ---
+        log_info "Aguardando serviço estabilizar (Health Check)..."
+        if check_service_health "openclaw_openclaw" 1 300; then
+             log_success "Serviço OpenClaw está online e saudável!"
+             populate_swarm_volumes
+             sync_official_skills
+             install_initial_skills
+             
+             echo ""
+             echo -e "${BRANCO}Iniciando Wizard de Configuração...${RESET}"
+             sleep 2
+             setup_sandbox
+             run_wizard
+        else
+             log_error "Falha ao iniciar o serviço OpenClaw. Abortando Wizard."
+        fi
+        
     else
-        log_error "Falha ao iniciar o OpenClaw."
+        # === DEPLOY STANDALONE ===
+        log_info "Iniciando deploy Standalone (Docker Compose)..."
+        
+        # Configurações de ambiente
+        unset OPENCLAW_GATEWAY_TOKEN
+        export OPENCLAW_CONFIG_PATH="/root/openclaw/.openclaw"
+        export TZ="America/Sao_Paulo"
+        export NODE_ENV="production"
+        
+        docker compose pull
+        docker compose up -d
+        
+        log_info "Aguardando containers ficarem saudáveis..."
+        # Verifica container openclaw-gateway
+        local max_retries=30
+        local count=0
+        local healthy=false
+        
+        while [ $count -lt $max_retries ]; do
+            if docker compose ps | grep "openclaw-gateway" | grep -q "Up"; then
+                healthy=true
+                break
+            fi
+            sleep 2
+            count=$((count+1))
+            echo -n "."
+        done
+        echo ""
+        
+        if [ "$healthy" = true ]; then
+            log_success "OpenClaw iniciado com sucesso!"
+            sync_official_skills
+            install_initial_skills
+            
+            echo ""
+            echo -e "${BRANCO}Iniciando Wizard de Configuração...${RESET}"
+            sleep 2
+            setup_sandbox
+            run_wizard
+        else
+            log_error "Falha ao iniciar containers Standalone."
+            docker compose logs --tail 20
+        fi
     fi
 }
 
@@ -1420,6 +1568,20 @@ EOF
     fi
 }
 
+populate_swarm_volumes() {
+    log_info "Verificando e populando volumes do Swarm..."
+    # Copia skills iniciais se existirem localmente e estivermos em Swarm (volumes nomeados)
+    if [ -d "skills" ] && docker volume ls -q | grep -q "^openclaw_workspace$"; then
+        log_info "Copiando skills iniciais para volume openclaw_workspace..."
+         # Usa um container temporário para copiar
+         docker run --rm \
+            -v openclaw_workspace:/target \
+            -v "$(pwd)/skills":/source \
+            alpine sh -c "mkdir -p /target/skills && cp -rn /source/* /target/skills/ && chown -R 1000:1000 /target"
+         log_success "Skills copiadas para o volume Swarm."
+    fi
+}
+
 # --- Wizard Oficial ---
 
 run_wizard() {
@@ -1430,9 +1592,6 @@ run_wizard() {
         return
     fi
     
-    # GARANTE que o volume correto seja usado pelo docker-compose
-    export OPENCLAW_CONFIG_PATH="/root/openclaw/.openclaw"
-    
     cd "$INSTALL_DIR" || return
     
     # Verifica se a imagem existe
@@ -1441,27 +1600,55 @@ run_wizard() {
         docker compose pull || build_image
     fi
     
-    # Garante que os diretórios de persistência existem e têm permissão correta
-    prepare_persistence
+    # Detecta modo Swarm (Volumes nomeados)
+    local is_swarm=0
+    if docker volume ls -q | grep -q "^openclaw_config$"; then
+        is_swarm=1
+        log_info "Modo Swarm detectado (Volumes Nomeados)."
+    else
+        # Modo Standalone: Garante que os diretórios de persistência existem
+        export OPENCLAW_CONFIG_PATH="/root/openclaw/.openclaw"
+        prepare_persistence
+    fi
 
-    log_info "Executando 'openclaw onboard' via container temporário..."
+    log_info "Executando 'openclaw onboard'..."
     echo -e "${AMARELO}Siga as instruções na tela.${RESET}"
     echo -e "${AMARELO}NOTA: Se o processo exibir 'Onboarding complete' mas não sair automaticamente,${RESET}"
     echo -e "${AMARELO}pressione Ctrl+C para finalizar e continuar o setup.${RESET}"
     echo -e "${AMARELO}O assistente pode demorar alguns instantes para iniciar. Por favor, aguarde...${RESET}"
     echo ""
     
-    # Executa o serviço CLI definido no docker-compose.yml
-    docker compose run --rm openclaw-cli onboard
-    local exit_code=$?
+    local exit_code=0
     
-    # Validação de sucesso (mesmo com Ctrl+C)
+    if [ $is_swarm -eq 1 ]; then
+        # Executa Wizard usando volumes nomeados diretamente
+        # Usa -it para interatividade
+        docker run --rm -it \
+            -v openclaw_config:/home/openclaw/.openclaw \
+            -v openclaw_workspace:/home/openclaw/workspace \
+            -v openclaw_home:/home/openclaw \
+            watink/openclaw:latest openclaw onboard
+        exit_code=$?
+    else
+        # Executa o serviço CLI definido no docker-compose.yml (Standalone)
+        docker compose run --rm openclaw-cli onboard
+        exit_code=$?
+    fi
+    
+    # Validação de sucesso
     local config_valid=0
-    if [ -f "/root/openclaw/.openclaw/openclaw.json" ]; then
-         # Verifica se existe token (fallback simples via grep para não depender de jq aqui)
-         if grep -q "\"token\":" "/root/openclaw/.openclaw/openclaw.json"; then
+    if [ $is_swarm -eq 1 ]; then
+        # Verifica no volume
+        if docker run --rm -v openclaw_config:/data alpine grep -q "\"token\":" "/data/openclaw.json" 2>/dev/null; then
              config_valid=1
-         fi
+        fi
+    else
+        # Verifica no host
+        if [ -f "/root/openclaw/.openclaw/openclaw.json" ]; then
+             if grep -q "\"token\":" "/root/openclaw/.openclaw/openclaw.json"; then
+                 config_valid=1
+             fi
+        fi
     fi
     
     if [ $exit_code -eq 0 ] || [ $config_valid -eq 1 ]; then
@@ -1474,37 +1661,53 @@ run_wizard() {
         fi
         
         # --- FIX: Forçar Bind LAN no openclaw.json ---
-        # O Wizard gera o arquivo com bind="loopback" por padrão.
-        # Ajustamos para "lan" para garantir acesso externo (Traefik/Rede).
-        if [ -f "/root/openclaw/.openclaw/openclaw.json" ]; then
-             log_info "Forçando bind='lan' no openclaw.json..."
-             local tmp_json=$(mktemp)
-             # Verifica se jq está disponível
-             if command -v jq &> /dev/null; then
-                 jq '.gateway.bind = "lan"' "/root/openclaw/.openclaw/openclaw.json" > "$tmp_json"
-                 if [ -s "$tmp_json" ]; then
-                     mv "$tmp_json" "/root/openclaw/.openclaw/openclaw.json"
-                     chown 1000:1000 "/root/openclaw/.openclaw/openclaw.json"
-                     log_success "Configuração de bind atualizada para LAN."
+        log_info "Forçando bind='lan' no openclaw.json..."
+        
+        if [ $is_swarm -eq 1 ]; then
+             # Ajuste via container temporário (Swarm/Volume)
+             docker run --rm -v openclaw_config:/data watink/openclaw:latest \
+                 sh -c "if [ -f /home/openclaw/.openclaw/openclaw.json ]; then \
+                        apk add --no-cache jq >/dev/null 2>&1 || true; \
+                        if command -v jq >/dev/null; then \
+                            jq '.gateway.bind = \"lan\"' /home/openclaw/.openclaw/openclaw.json > /tmp/tmp.json && \
+                            mv /tmp/tmp.json /home/openclaw/.openclaw/openclaw.json && \
+                            chown 1000:1000 /home/openclaw/.openclaw/openclaw.json; \
+                        fi; \
+                        fi"
+             log_success "Configuração de bind atualizada (Volume Mode)."
+        else
+             # Ajuste via host (Standalone)
+             if [ -f "/root/openclaw/.openclaw/openclaw.json" ]; then
+                 local tmp_json=$(mktemp)
+                 if command -v jq &> /dev/null; then
+                     jq '.gateway.bind = "lan"' "/root/openclaw/.openclaw/openclaw.json" > "$tmp_json"
+                     if [ -s "$tmp_json" ]; then
+                         mv "$tmp_json" "/root/openclaw/.openclaw/openclaw.json"
+                         chown 1000:1000 "/root/openclaw/.openclaw/openclaw.json"
+                         log_success "Configuração de bind atualizada para LAN."
+                     fi
                  else
-                     log_warn "Falha ao atualizar openclaw.json (saída vazia)."
+                     log_warn "jq não encontrado. Não foi possível ajustar o bind."
                  fi
-             else
-                 log_warn "jq não encontrado. Não foi possível ajustar o bind no arquivo json."
+                 rm -f "$tmp_json"
              fi
-             rm -f "$tmp_json"
         fi
 
         # Ler novo token gerado pelo Wizard
         local new_token=""
-        if [ -f "/root/openclaw/.openclaw/openclaw.json" ]; then
-             new_token=$(jq -r '.gateway.auth.token // empty' "/root/openclaw/.openclaw/openclaw.json")
+        if [ $is_swarm -eq 1 ]; then
+             new_token=$(docker run --rm -v openclaw_config:/data watink/openclaw:latest \
+                 sh -c "apk add --no-cache jq >/dev/null 2>&1 || true; jq -r '.gateway.auth.token // empty' /home/openclaw/.openclaw/openclaw.json 2>/dev/null")
+        else
+             if [ -f "/root/openclaw/.openclaw/openclaw.json" ]; then
+                  new_token=$(jq -r '.gateway.auth.token // empty' "/root/openclaw/.openclaw/openclaw.json")
+             fi
         fi
 
         echo -e "${VERDE}Reiniciando gateway para aplicar alterações...${RESET}"
         
         # Standalone
-        if [ -f "docker-compose.yml" ]; then
+        if [ -f "docker-compose.yml" ] && [ $is_swarm -eq 0 ]; then
              if [ -n "$new_token" ]; then
                  export OPENCLAW_GATEWAY_TOKEN="$new_token"
              fi
@@ -1926,8 +2129,8 @@ menu() {
         echo -e "${BRANCO}Selecione uma opção:${RESET}"
         echo ""
         echo -e "${AZUL}--- Instalação & Setup ---${RESET}"
-        echo -e "${VERDE}1${BRANCO} - Instalação Completa (Swarm + Portainer + Traefik)${RESET}"
-        echo -e "${VERDE}2${BRANCO} - Instalação Standalone (Padrão)${RESET}"
+        echo -e "${VERDE}1${BRANCO} - Setup Infraestrutura (Swarm/Standalone)${RESET}"
+        echo -e "${VERDE}2${BRANCO} - Deploy OpenClaw (Aplicação)${RESET}"
         echo -e "${VERDE}3${BRANCO} - Apenas Instalar Docker${RESET}"
         echo ""
         echo -e "${AZUL}--- Configuração & Gestão ---${RESET}"
@@ -1965,7 +2168,25 @@ menu() {
                 check_root
                 check_deps
                 ensure_docker_permission
-                install_full_stack_swarm
+                
+                header
+                echo -e "${AZUL}=== Setup Infraestrutura ===${RESET}"
+                echo -e "${BRANCO}Qual tipo de ambiente deseja preparar?${RESET}"
+                echo -e "${VERDE}1${BRANCO} - Standalone (Docker + Portainer Local)${RESET}"
+                echo -e "${VERDE}2${BRANCO} - Swarm (Cluster + Traefik + Portainer)${RESET}"
+                echo ""
+                echo -en "${AMARELO}Opção: ${RESET}"
+                read -r ENV_OPT
+                
+                if [ "$ENV_OPT" == "1" ]; then
+                     install_docker
+                     install_portainer_standalone
+                elif [ "$ENV_OPT" == "2" ]; then
+                     install_full_stack_swarm
+                else
+                     log_error "Opção inválida."
+                fi
+                
                 read -p "Pressione ENTER para continuar..."
                 ;;
             2)
@@ -2094,4 +2315,6 @@ menu() {
 }
 
 # Execução
+check_root
+setup_hostname
 menu
