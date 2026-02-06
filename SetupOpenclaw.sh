@@ -915,6 +915,39 @@ cleanup_vps() {
     log_success "Limpeza concluída! O OpenClaw foi removido deste servidor."
 }
 
+uninstall_docker() {
+    log_info "Iniciando desinstalação COMPLETA do Docker..."
+    echo ""
+    echo -e "${VERMELHO}!!! CUIDADO !!!${RESET}"
+    echo -e "Esta ação irá remover:"
+    echo -e "  - Docker Engine, CLI, Containerd, Docker Compose"
+    echo -e "  - TODOS os containers, imagens, volumes e redes"
+    echo -e "  - Diretórios /var/lib/docker e /var/lib/containerd"
+    echo ""
+    echo -en "${BRANCO}Tem certeza absoluta? [sim/N]: ${RESET}"
+    read -r CONFIRM_DOCKER
+
+    if [ "$CONFIRM_DOCKER" != "sim" ]; then
+        log_info "Operação cancelada."
+        return
+    fi
+
+    log_info "Parando serviços Docker..."
+    systemctl stop docker.service docker.socket containerd.service >/dev/null 2>&1
+
+    log_info "Removendo pacotes..."
+    apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-compose-v2 docker-ce-rootless-extras >/dev/null 2>&1
+    apt-get autoremove -y >/dev/null 2>&1
+
+    log_info "Removendo diretórios de dados..."
+    rm -rf /var/lib/docker
+    rm -rf /var/lib/containerd
+    rm -rf /etc/docker
+
+    log_success "Docker desinstalado completamente."
+}
+
+
 # --- Setup Sandbox ---
 # Constrói a imagem base de sandbox necessária para execução isolada de tools
 setup_sandbox() {
@@ -1187,6 +1220,7 @@ menu() {
         echo ""
         echo -e "${AZUL}--- Sistema ---${RESET}"
         echo -e "${VERMELHO}11${BRANCO} - Limpar VPS (Desinstalar OpenClaw)${RESET}"
+        echo -e "${VERMELHO}12${BRANCO} - Desinstalar Docker (Remove TUDO)${RESET}"
         echo -e "${VERDE}0${BRANCO} - Sair${RESET}"
         echo ""
         echo -en "${AMARELO}Opção: ${RESET}"

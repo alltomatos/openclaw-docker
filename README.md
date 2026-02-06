@@ -45,27 +45,24 @@ rm -rf SetupOpenclaw.sh && curl -sSL https://raw.githubusercontent.com/alltomato
 ![Setup OpenClaw Menu](./imagem/setup1.5.0.png)
 
 O menu interativo facilita o gerenciamento do ambiente:
-1.  **Instalar/Atualizar**: Realiza o deploy completo (Standalone ou Swarm).
-2.  **Apenas Instalar Docker**: Prepara o servidor se ele estiver "zerado".
-3.  **Ver Logs**: Atalho para visualizar o que está acontecendo.
-4.  **Acessar Terminal**: Entra no container para manutenção avançada.
+1.  **Instalação Completa (Swarm + Portainer + Traefik + OpenClaw)**: Opção recomendada ("Zero to Hero"). Instala tudo do zero.
+2.  **Instalar OpenClaw**: Deploy em ambiente Standalone ou em Cluster existente.
+3.  **Apenas Instalar Docker**: Prepara o servidor se ele estiver "zerado".
+4.  **Setup Wizard**: Executa o assistente oficial de configuração (Onboarding).
 5.  **Gerenciar Skills**: Menu dedicado para adicionar e escanear plugins/skills.
-6.  **Rodar Setup Wizard**: Executa o assistente oficial de configuração (Onboarding).
+6.  **Gerenciar Dispositivos**: Interface interativa para listar e aprovar novos dispositivos (pairing).
 7.  **Gerar QR Code WhatsApp**: Atalho rápido para conectar seu WhatsApp.
-8.  **Reiniciar Gateway**: Reinicia o serviço de gateway (útil após conectar canais).
-9.  **Limpar VPS**: Remove completamente o OpenClaw (cuidado!).
-10. **Instalação Completa (Zero to Hero)**: Opção recomendada para servidores novos. Instala e configura automaticamente:
-    - Docker & Docker Swarm.
-    - **Traefik** (Proxy Reverso com SSL automático).
-    - **Portainer** (Interface de Gestão) já com **usuário admin criado**.
-    - **OpenClaw** integrado ao cluster.
-11. **Aprovar Dispositivo**: Interface interativa para listar e aprovar novos dispositivos (pairing) sem precisar decorar comandos.
+8.  **Ver Logs**: Atalho para visualizar o que está acontecendo.
+9.  **Acessar Terminal**: Entra no container para manutenção avançada.
+10. **Reiniciar Gateway**: Reinicia o serviço de gateway.
+11. **Limpar VPS**: Remove completamente o OpenClaw (cuidado!).
+12. **Desinstalar Docker**: Remove completamente o Docker e todos os dados (limpeza total).
 
-Siga as instruções do menu interativo. O script detectará automaticamente se é necessário instalar a infraestrutura e guiará você passo-a-passo.
-
-### 🌟 Destaque: Instalação Completa (Opção 10)
+### 🌟 Destaque: Instalação Completa (Opção 1)
 Esta opção transforma um VPS vazio em um ambiente de produção completo em minutos.
-- **Automação Total**: Diferente de outros setups, este script já cria o **usuário Admin do Portainer** para você, evitando que a interface fique exposta para registro público.
+- **Docker Swarm**: Inicia automaticamente o cluster Swarm.
+- **Automação Total**: Instala **Traefik** (Proxy Reverso com SSL) e **Portainer** (Interface de Gestão).
+- **Gestão Facilitada**: Já cria o **usuário Admin do Portainer** para você.
 - **Credenciais Seguras**: Ao final, todas as senhas, tokens e URLs gerados são salvos em um arquivo protegido:
   ```bash
   /root/dados_vps/openclaw.txt
