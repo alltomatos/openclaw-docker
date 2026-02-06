@@ -251,9 +251,29 @@ services:
     image: watink/openclaw:latest
     networks:
       - $network_name
+    environment:
+      - OPENCLAW_DISABLE_BONJOUR=1
+      # Bind LAN (necessário para Traefik alcançar o container)
+      - OPENCLAW_GATEWAY_BIND=lan
+      # Token de Gateway para automação
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-$gateway_token}
+      # Configurações Adicionais (OpenClaw Best Practices)
+      - TZ=America/Sao_Paulo
+      - NODE_ENV=production
+    # Permite iniciar sem config para rodar o onboard depois
+    command: ["openclaw", "gateway", "--allow-unconfigured"]
+    healthcheck:
+      test: ["CMD", "node", "dist/index.js", "health", "--json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       mode: replicated
       replicas: 1
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.openclaw.rule=Host(\`$domain\`)"
@@ -262,14 +282,6 @@ services:
         - "traefik.http.routers.openclaw.tls.certresolver=letsencryptresolver"
         - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
         # Canvas Host (Porta 18793) - Requer subdomínio ou path separado se exposto via Traefik
-    environment:
-      - OPENCLAW_DISABLE_BONJOUR=1
-      # Bind LAN (necessário para Traefik alcançar o container)
-      - OPENCLAW_GATEWAY_BIND=lan
-      # Token de Gateway para automação
-      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-$gateway_token}
-    # Permite iniciar sem config para rodar o onboard depois
-    command: ["openclaw", "gateway", "--allow-unconfigured"]
     volumes:
       # Persistência via Volumes Nomeados (Padrão Swarm-Native)
       - openclaw_config:/home/openclaw/.openclaw
@@ -1144,6 +1156,8 @@ setup_openclaw() {
     # export OPENCLAW_GATEWAY_TOKEN="$GEN_TOKEN"
     unset OPENCLAW_GATEWAY_TOKEN
     export OPENCLAW_CONFIG_PATH="/root/openclaw/.openclaw"
+    export TZ="America/Sao_Paulo"
+    export NODE_ENV="production"
     
     docker compose pull
     docker compose up -d

@@ -5,23 +5,32 @@ services:
     image: watink/openclaw:latest
     networks:
       - traefik_net
+    environment:
+      - OPENCLAW_DISABLE_BONJOUR=1
+      - OPENCLAW_GATEWAY_BIND=lan
+      - TZ=America/Sao_Paulo
+      - NODE_ENV=production
+    command: [ "openclaw", "gateway", "--allow-unconfigured" ]
+    healthcheck:
+      test: [ "CMD", "node", "dist/index.js", "health", "--json" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       mode: replicated
       replicas: 1
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.openclaw.rule=Host(`${DOMAIN:-openclaw.app.localhost}`)"
         - "traefik.http.routers.openclaw.entrypoints=web"
         - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
         # --- Autenticação (Basic Auth) ---
-        # Substitua o hash abaixo pelo seu. Gerar com: htpasswd -nb admin seu_token
-        # Exemplo (admin:token123):
         - "traefik.http.middlewares.openclaw-auth.basicauth.users=admin:$$apr1$$9k6o0...$$..."
         - "traefik.http.routers.openclaw.middlewares=openclaw-auth"
-        # Configuração TLS/HTTPS (Descomente se necessário)
-        # - "traefik.http.routers.openclaw.entrypoints=websecure"
-        # - "traefik.http.routers.openclaw.tls=true"
-        # - "traefik.http.routers.openclaw.tls.certresolver=myresolver"
     volumes:
       - openclaw_config:/home/openclaw/.openclaw
       - openclaw_workspace:/home/openclaw/workspace
