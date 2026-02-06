@@ -41,7 +41,7 @@ Acesse seu servidor via SSH como `root` e execute o comando abaixo:
 rm -rf SetupOpenclaw.sh && curl -sSL https://raw.githubusercontent.com/alltomatos/openclaw-docker/main/SetupOpenclaw.sh -o SetupOpenclaw.sh && chmod +x SetupOpenclaw.sh && ./SetupOpenclaw.sh
 ```
 
-![Setup OpenClaw Menu](./imagem/setup.png)
+![Setup OpenClaw Menu](./imagem/setup1.3.0.png)
 
 O menu interativo facilita o gerenciamento do ambiente:
 1.  **Instalar/Atualizar**: Realiza o deploy completo (Standalone ou Swarm).
