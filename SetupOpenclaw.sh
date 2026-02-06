@@ -216,17 +216,27 @@ setup_security_config() {
     docker cp "$container_id":/home/openclaw/.openclaw/openclaw.json ./current_config.json 2>/dev/null || echo "{}" > ./current_config.json
 
     # Fix self-healing: Remove invalid key 'gateway.auth.type' if present (bug fix)
+    local CONFIG_CHANGED=false
     if jq -e '.gateway.auth.type' ./current_config.json >/dev/null 2>&1; then
         log_info "Corrigindo configuração antiga (removendo gateway.auth.type inválido)..."
         jq 'del(.gateway.auth.type)' ./current_config.json > ./fixed_config.json && mv ./fixed_config.json ./current_config.json
-        # Force re-apply of correct settings if needed, or just let it continue
+        CONFIG_CHANGED=true
     fi
 
     # Verificar se já tem gateway.auth.token configurado
     local HAS_TOKEN=$(jq -r '.gateway.auth.token // empty' ./current_config.json 2>/dev/null)
     
     if [ -n "$HAS_TOKEN" ]; then
-        log_info "Configuração de segurança já existente. Mantendo atual."
+        if [ "$CONFIG_CHANGED" = true ]; then
+            log_info "Aplicando correções na configuração existente..."
+            docker cp ./current_config.json "$container_id":/home/openclaw/.openclaw/openclaw.json
+            docker exec -u root "$container_id" chown openclaw:openclaw /home/openclaw/.openclaw/openclaw.json
+            log_info "Reiniciando container para aplicar correções..."
+            docker restart "$container_id"
+            log_success "Configuração corrigida com sucesso."
+        else
+            log_info "Configuração de segurança já existente e correta."
+        fi
         rm -f ./current_config.json
         return
     fi
@@ -259,13 +269,23 @@ setup_security_config() {
     log_info "Reiniciando container para carregar novas configurações..."
     docker restart "$container_id"
     
+    # Salvar token em arquivo seguro
+    mkdir -p /root/dados_vps
+    echo "================================================================" > /root/dados_vps/openclaw.txt
+    echo " DATA DE INSTALAÇÃO: $(date)" >> /root/dados_vps/openclaw.txt
+    echo "================================================================" >> /root/dados_vps/openclaw.txt
+    echo " TOKEN DE ACESSO (GATEWAY):" >> /root/dados_vps/openclaw.txt
+    echo " $NEW_TOKEN" >> /root/dados_vps/openclaw.txt
+    echo "================================================================" >> /root/dados_vps/openclaw.txt
+    chmod 600 /root/dados_vps/openclaw.txt
+
     log_success "Segurança configurada com sucesso!"
     echo ""
     echo -e "${AZUL}================================================================${RESET}"
     echo -e "${VERDE} TOKEN DE ACESSO GERADO (GATEWAY):${RESET}"
     echo -e "${BRANCO} $NEW_TOKEN ${RESET}"
     echo -e "${AZUL}================================================================${RESET}"
-    echo -e "Guarde este token. Você precisará dele para autenticar no painel ou CLI."
+    echo -e "Guarde este token. Uma cópia foi salva em: ${VERDE}/root/dados_vps/openclaw.txt${RESET}"
     echo ""
     
     rm -f ./current_config.json ./new_config.json
@@ -409,6 +429,15 @@ setup_openclaw() {
                 if [ -n "$AUTH_HASH" ]; then
                     log_success "Hash gerado com sucesso!"
                     echo -e "Credenciais: ${VERDE}$AUTH_USER${RESET} / ${VERDE}******${RESET}"
+                    
+                    # Salvar credenciais Swarm
+                    mkdir -p /root/dados_vps
+                    echo "" >> /root/dados_vps/openclaw.txt
+                    echo " ACESSO WEB (SWARM):" >> /root/dados_vps/openclaw.txt
+                    echo " URL: http://$DOMAIN" >> /root/dados_vps/openclaw.txt
+                    echo " USER: $AUTH_USER" >> /root/dados_vps/openclaw.txt
+                    echo " PASS: $AUTH_PASS" >> /root/dados_vps/openclaw.txt
+                    chmod 600 /root/dados_vps/openclaw.txt
                 else
                     log_error "Não foi possível gerar o hash (requer internet para baixar httpd:alpine ou python3 local)."
                     echo -e "${AMARELO}A instalação continuará sem autenticação.${RESET}"
