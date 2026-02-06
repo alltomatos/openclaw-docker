@@ -279,13 +279,24 @@ setup_security_config() {
         return
     fi
 
-    # Ler configuração atual diretamente do container
-    # Usamos cat para ler sem copiar o arquivo para o host
-    local config_content=$(docker exec "$container_id" cat /home/openclaw/.openclaw/openclaw.json 2>/dev/null)
+    # Tenta ler do host primeiro (mais robusto para Swarm)
+    local config_content=""
+    local host_config="/root/openclaw/.openclaw/openclaw.json"
+    
+    if [ -f "$host_config" ]; then
+        config_content=$(cat "$host_config")
+    fi
+    
+    # Se falhar ou não existir no host, tenta via container (fallback)
+    if [ -z "$config_content" ]; then
+        # Ler configuração atual diretamente do container
+        # Usamos cat para ler sem copiar o arquivo para o host
+        config_content=$(docker exec "$container_id" cat /home/openclaw/.openclaw/openclaw.json 2>/dev/null)
+    fi
     
     # Se não conseguir ler, assume vazio
     if [ -z "$config_content" ]; then
-         log_warn "Arquivo de configuração não encontrado ou vazio dentro do container."
+         log_warn "Arquivo de configuração não encontrado ou vazio (Host/Container)."
     fi
 
     # Verificar se tem token configurado pelo Wizard
@@ -517,28 +528,56 @@ deploy_stack_via_api() {
     local response_output=$(mktemp)
     local error_output=$(mktemp)
     
-    # API Request para criar stack
-    local http_code=$(curl -s -o "$response_output" -w "%{http_code}" -k -X POST \
-    -H "Authorization: Bearer $token" \
-    --resolve "$p_domain:443:127.0.0.1" \
-    -F "Name=$stack_name" \
-    -F "file=@$(pwd)/$compose_file" \
-    -F "SwarmID=$swarm_id" \
-    -F "endpointId=$endpoint_id" \
-    "$portainer_url/api/stacks/create/swarm/file" 2> "$error_output")
-    
-    if [ "$http_code" -eq 200 ]; then
-        log_success "Deploy da stack '$stack_name' realizado com SUCESSO via Portainer API!"
-        log_info "A stack agora deve aparecer como 'Total Control' no Portainer."
-    elif [ "$http_code" -eq 409 ]; then
-        log_warn "Stack '$stack_name' já existe no Portainer (Conflito). Atualizando via CLI..."
-        docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+    # Verificar se a stack já existe
+    local stack_id=$(curl -k -s -H "Authorization: Bearer $token" --resolve "$p_domain:443:127.0.0.1" "$portainer_url/api/stacks" | jq -r --arg name "$stack_name" '.[] | select(.Name == $name) | .Id')
+
+    if [ -n "$stack_id" ] && [ "$stack_id" != "null" ]; then
+         log_info "Stack '$stack_name' encontrada (ID: $stack_id). Atualizando via API..."
+         
+         # Preparar payload JSON seguro usando jq
+         local file_content=$(cat "$compose_file")
+         local payload=$(jq -n --arg content "$file_content" --argjson prune true '{StackFileContent: $content, Prune: $prune}')
+         
+         # API Request para ATUALIZAR stack
+         local http_code=$(curl -s -o "$response_output" -w "%{http_code}" -k -X PUT \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: application/json" \
+            --resolve "$p_domain:443:127.0.0.1" \
+            -d "$payload" \
+            "$portainer_url/api/stacks/$stack_id?endpointId=$endpoint_id" 2> "$error_output")
+            
+         if [ "$http_code" -eq 200 ]; then
+            log_success "Stack '$stack_name' atualizada com SUCESSO via Portainer API!"
+         else
+            log_error "Erro ao atualizar stack via API (HTTP $http_code)."
+            log_error "Resposta: $(cat $response_output)"
+            log_info "Tentando fallback via CLI..."
+            docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+         fi
     else
-        log_error "Erro no deploy via API (HTTP $http_code)."
-        log_error "Resposta: $(cat $response_output)"
-        log_error "Detalhes: $(cat $error_output)"
-        log_info "Tentando fallback via CLI..."
-        docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+        # API Request para CRIAR stack
+        local http_code=$(curl -s -o "$response_output" -w "%{http_code}" -k -X POST \
+        -H "Authorization: Bearer $token" \
+        --resolve "$p_domain:443:127.0.0.1" \
+        -F "Name=$stack_name" \
+        -F "file=@$(pwd)/$compose_file" \
+        -F "SwarmID=$swarm_id" \
+        -F "endpointId=$endpoint_id" \
+        "$portainer_url/api/stacks/create/swarm/file" 2> "$error_output")
+        
+        if [ "$http_code" -eq 200 ]; then
+            log_success "Deploy da stack '$stack_name' realizado com SUCESSO via Portainer API!"
+            log_info "A stack agora deve aparecer como 'Total Control' no Portainer."
+        elif [ "$http_code" -eq 409 ]; then
+            log_warn "Stack '$stack_name' já existe no Portainer (Conflito detectado tardiamente). Atualizando via CLI..."
+            docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+        else
+            log_error "Erro no deploy via API (HTTP $http_code)."
+            log_error "Resposta: $(cat $response_output)"
+            log_error "Detalhes: $(cat $error_output)"
+            log_info "Tentando fallback via CLI..."
+            docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+        fi
     fi
     
     rm -f "$response_output" "$error_output"
@@ -1239,16 +1278,61 @@ run_wizard() {
     
     if [ $? -eq 0 ]; then
         log_success "Wizard concluído com sucesso."
+        
+        # Ler novo token gerado pelo Wizard
+        local new_token=""
+        if [ -f "/root/openclaw/.openclaw/openclaw.json" ]; then
+             new_token=$(jq -r '.gateway.auth.token // empty' "/root/openclaw/.openclaw/openclaw.json")
+        fi
+
         echo -e "${VERDE}Reiniciando gateway para aplicar alterações...${RESET}"
         
         # Standalone
         if [ -f "docker-compose.yml" ]; then
+             if [ -n "$new_token" ]; then
+                 export OPENCLAW_GATEWAY_TOKEN="$new_token"
+             fi
              docker compose restart openclaw-gateway
         fi
         
         # Swarm
         if docker service ps openclaw_openclaw >/dev/null 2>&1; then
-             docker service update --force openclaw_openclaw
+             log_info "Modo Swarm detectado. Atualizando Stack no Portainer com novo token..."
+             
+             # Tentar recuperar configurações originais
+             local domain=""
+             if [ -f "/root/dados_vps/openclaw.txt" ]; then
+                 # Extrai domínio da URL
+                 domain=$(grep "URL: " /root/dados_vps/openclaw.txt | awk '{print $2}' | sed 's|http://||' | sed 's|https://||' | cut -d/ -f1)
+             fi
+             [ -z "$domain" ] && domain="openclaw.app.localhost"
+             
+             # Recuperar Rede Traefik
+             local network_name=$(detect_swarm_traefik)
+             [ -z "$network_name" ] && network_name="public_net"
+             
+             # Recuperar/Gerar Auth Hash
+             local auth_hash=""
+             local auth_user=$(grep "USER: " /root/dados_vps/openclaw.txt | awk '{print $2}')
+             local auth_pass=$(grep "PASS: " /root/dados_vps/openclaw.txt | awk '{print $2}')
+             
+             if [ -n "$auth_user" ] && [ -n "$auth_pass" ]; then
+                  log_info "Regerando hash de autenticação..."
+                  auth_hash=$(docker run --rm --entrypoint htpasswd httpd:alpine -nb "$auth_user" "$auth_pass" 2>/dev/null)
+                  if [ -z "$auth_hash" ] && command -v python3 &>/dev/null; then
+                       local pass_hash=$(python3 -c "import crypt; print(crypt.crypt('$auth_pass', crypt.mksalt(crypt.METHOD_MD5)))" 2>/dev/null)
+                       [ -n "$pass_hash" ] && auth_hash="$auth_user:$pass_hash"
+                  fi
+             fi
+             
+             # Regerar arquivo de configuração Swarm com o NOVO TOKEN e atualizar Stack
+             if [ -n "$new_token" ]; then
+                 generate_swarm_config "$network_name" "$domain" "$auth_hash" "$new_token"
+                 deploy_stack_via_api "openclaw" "docker-compose.swarm.yml"
+             else
+                 log_warn "Novo token não encontrado. Forçando apenas restart do serviço..."
+                 docker service update --force openclaw_openclaw
+             fi
         fi
         
         echo -e "${VERDE}Sincronizando informações de conexão (Token)...${RESET}"
