@@ -1266,7 +1266,19 @@ run_wizard() {
     if [ $? -eq 0 ]; then
         log_success "Wizard concluído com sucesso."
         echo -e "${VERDE}Reiniciando gateway para aplicar alterações...${RESET}"
-        docker compose restart openclaw-gateway
+        
+        # Standalone
+        if [ -f "docker-compose.yml" ]; then
+             docker compose restart openclaw-gateway
+        fi
+        
+        # Swarm
+        if docker service ps openclaw_openclaw >/dev/null 2>&1; then
+             docker service update --force openclaw_openclaw
+        fi
+        
+        echo -e "${VERDE}Sincronizando informações de conexão (Token)...${RESET}"
+        setup_security_config "" ""
     else
         log_error "Wizard cancelado ou falhou."
     fi
@@ -1516,6 +1528,7 @@ menu() {
         echo -e "${VERDE}10${BRANCO} - Ver Logs do OpenClaw${RESET}"
         echo -e "${VERDE}11${BRANCO} - Acessar Terminal do Container${RESET}"
         echo -e "${VERDE}12${BRANCO} - Reiniciar Gateway${RESET}"
+        echo -e "${VERDE}15${BRANCO} - Exibir Dados de Conexão (Token/URL)${RESET}"
         echo ""
         echo -e "${AZUL}--- Sistema ---${RESET}"
         echo -e "${VERMELHO}13${BRANCO} - Limpar VPS (Desinstalar OpenClaw)${RESET}"
@@ -1608,6 +1621,12 @@ menu() {
             12)
                 check_root
                 restart_gateway
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            15)
+                check_root
+                echo -e "${AZUL}Sincronizando e exibindo informações de conexão...${RESET}"
+                setup_security_config "" ""
                 read -p "Pressione ENTER para continuar..."
                 ;;
             13)
