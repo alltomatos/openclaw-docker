@@ -1460,7 +1460,28 @@ setup_openclaw() {
         
         # Para garantir, vamos verificar se o serviço subiu
         log_info "Aguardando containers ficarem saudáveis..."
-        if check_service_health "openclaw-gateway" 1 300 || docker compose ps | grep "openclaw-gateway" | grep -q "Up"; then
+        
+        # FIX: check_service_health usa 'docker service ls' que só funciona em Swarm.
+        # Em Standalone, usamos 'docker compose ps' ou 'docker inspect'.
+        # Removemos a chamada de check_service_health para standalone.
+        
+        local max_retries=30
+        local count=0
+        local healthy=false
+        
+        while [ $count -lt $max_retries ]; do
+            # Verifica se o container existe e está Up
+            if docker compose ps | grep "openclaw-gateway" | grep -q "Up"; then
+                healthy=true
+                break
+            fi
+            sleep 2
+            count=$((count+1))
+            echo -n "."
+        done
+        echo ""
+        
+        if [ "$healthy" = true ]; then
             log_success "OpenClaw iniciado com sucesso!"
             sync_official_skills
             install_initial_skills
