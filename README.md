@@ -54,10 +54,25 @@ O menu interativo facilita o gerenciamento do ambiente:
 7.  **Gerar QR Code WhatsApp**: Atalho rápido para conectar seu WhatsApp.
 8.  **Reiniciar Gateway**: Reinicia o serviço de gateway (útil após conectar canais).
 9.  **Limpar VPS**: Remove completamente o OpenClaw (cuidado!).
-10. **Instalação Completa**: Instala Docker, Swarm, Traefik, Portainer (com admin) e OpenClaw.
-11. **Aprovar Dispositivo**: Facilita a aprovação de novos dispositivos (Device Pairing) conectados ao Gateway.
+10. **Instalação Completa (Zero to Hero)**: Opção recomendada para servidores novos. Instala e configura automaticamente:
+    - Docker & Docker Swarm.
+    - **Traefik** (Proxy Reverso com SSL automático).
+    - **Portainer** (Interface de Gestão) já com **usuário admin criado**.
+    - **OpenClaw** integrado ao cluster.
+11. **Aprovar Dispositivo**: Interface interativa para listar e aprovar novos dispositivos (pairing) sem precisar decorar comandos.
 
-Siga as instruções do menu interativo. O script detectará automaticamente se é necessário instalar a infraestrutura e guiará você passo-a-passo. Você poderá escolher entre o modo **Cluster (Swarm + Traefik)** ou **Standalone (Docker Puro)**.
+Siga as instruções do menu interativo. O script detectará automaticamente se é necessário instalar a infraestrutura e guiará você passo-a-passo.
+
+### 🌟 Destaque: Instalação Completa (Opção 10)
+Esta opção transforma um VPS vazio em um ambiente de produção completo em minutos.
+- **Automação Total**: Diferente de outros setups, este script já cria o **usuário Admin do Portainer** para você, evitando que a interface fique exposta para registro público.
+- **Credenciais Seguras**: Ao final, todas as senhas, tokens e URLs gerados são salvos em um arquivo protegido:
+  ```bash
+  /root/dados_vps/openclaw.txt
+  ```
+  *(Apenas o usuário root pode ler este arquivo)*.
+
+### ☁️ Modos de Instalação
 
 > **Nota:** Se o script detectar um cluster Swarm com Traefik, ele oferecerá a opção de configurar o OpenClaw como um serviço replicado e acessível via domínio (ex: `openclaw.app.localhost`).
 
@@ -188,6 +203,7 @@ No final da instalação, você verá:
  TOKEN DE ACESSO GERADO (GATEWAY):
  a1b2c3d4... (seu token único)
 ================================================================
+Guarde este token. Uma cópia foi salva em: /root/dados_vps/openclaw.txt
 ```
 
 Caso precise configurar manualmente (ex: rotação de chaves), edite o `openclaw.json`:
@@ -224,6 +240,12 @@ O Dashboard (Control UI) é acessível via navegador na porta `18789`.
 Por segurança, o OpenClaw exige que novos dispositivos (navegadores) sejam aprovados manualmente se não estiverem rodando na mesma máquina (localhost).
 Se você vir a mensagem **"Disconnected (1008): Pairing Required"** ou similar:
 
+**Opção A: Via Menu (Recomendado)**
+1. Rode `./SetupOpenclaw.sh` no servidor.
+2. Escolha a **Opção 11 - Aprovar Dispositivo**.
+3. Selecione o ID correspondente ao seu navegador na lista.
+
+**Opção B: Via Terminal Manual**
 1.  Acesse o terminal da VPS (ou use a **Opção 4** do menu).
 2.  Liste os pedidos pendentes:
     ```bash
