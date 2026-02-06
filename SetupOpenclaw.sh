@@ -440,8 +440,14 @@ install_full_stack_swarm() {
     docker volume create volume_swarm_certificates >/dev/null 2>&1
     docker volume create portainer_data >/dev/null 2>&1
     
+    # Garantir diretório temporário para arquivos de configuração
+    local TEMP_SETUP_DIR="/tmp/openclaw_setup_$(date +%s)"
+    mkdir -p "$TEMP_SETUP_DIR"
+    local CURRENT_DIR=$(pwd)
+    cd "$TEMP_SETUP_DIR" || exit
+
     # 5. Deploy Traefik
-    log_info "Preparando Traefik..."
+    log_info "Preparando Traefik em $TEMP_SETUP_DIR..."
     cat > traefik.yaml <<EOF
 version: "3.7"
 services:
@@ -604,6 +610,11 @@ EOF
     # ou podemos chamar setup_openclaw e o usuário escolhe Swarm (que já vai ser detectado!)
     
     log_info "Continuando para instalação do OpenClaw..."
+    
+    # Limpeza do diretório temporário
+    cd "$CURRENT_DIR" || true
+    rm -rf "$TEMP_SETUP_DIR"
+
     setup_openclaw
 }
 
@@ -1095,17 +1106,24 @@ menu() {
         header
         echo -e "${BRANCO}Selecione uma opção:${RESET}"
         echo ""
-        echo -e "${VERDE}1${BRANCO} - Instalar/Atualizar OpenClaw (Completo)${RESET}"
-        echo -e "${VERDE}2${BRANCO} - Apenas Instalar Docker${RESET}"
-        echo -e "${VERDE}3${BRANCO} - Ver Logs do OpenClaw${RESET}"
-        echo -e "${VERDE}4${BRANCO} - Acessar Terminal do Container${RESET}"
+        echo -e "${AZUL}--- Instalação ---${RESET}"
+        echo -e "${VERDE}1${BRANCO} - Instalação Completa (Swarm + Portainer + Traefik + OpenClaw)${RESET}"
+        echo -e "${VERDE}2${BRANCO} - Instalar OpenClaw (Standalone ou Cluster Existente)${RESET}"
+        echo -e "${VERDE}3${BRANCO} - Apenas Instalar Docker${RESET}"
+        echo ""
+        echo -e "${AZUL}--- Configuração & Gerenciamento ---${RESET}"
+        echo -e "${VERDE}4${BRANCO} - Setup Wizard (Onboard Oficial)${RESET}"
         echo -e "${VERDE}5${BRANCO} - Gerenciar Skills (Plugins)${RESET}"
-        echo -e "${VERDE}6${BRANCO} - Rodar Setup Wizard (Onboard Oficial)${RESET}"
+        echo -e "${VERDE}6${BRANCO} - Gerenciar Dispositivos (Aprovar Pairing)${RESET}"
         echo -e "${VERDE}7${BRANCO} - Gerar QR Code WhatsApp${RESET}"
-        echo -e "${VERDE}8${BRANCO} - Reiniciar Gateway${RESET}"
-        echo -e "${VERDE}10${BRANCO} - Instalação Completa (Swarm + Portainer + Traefik)${RESET}"
-        echo -e "${VERDE}11${BRANCO} - Aprovar Dispositivo (Device Pairing)${RESET}"
-        echo -e "${VERMELHO}9${BRANCO} - Limpar VPS (Remover OpenClaw)${RESET}"
+        echo ""
+        echo -e "${AZUL}--- Utilitários ---${RESET}"
+        echo -e "${VERDE}8${BRANCO} - Ver Logs do OpenClaw${RESET}"
+        echo -e "${VERDE}9${BRANCO} - Acessar Terminal do Container${RESET}"
+        echo -e "${VERDE}10${BRANCO} - Reiniciar Gateway${RESET}"
+        echo ""
+        echo -e "${AZUL}--- Sistema ---${RESET}"
+        echo -e "${VERMELHO}11${BRANCO} - Limpar VPS (Desinstalar OpenClaw)${RESET}"
         echo -e "${VERDE}0${BRANCO} - Sair${RESET}"
         echo ""
         echo -en "${AMARELO}Opção: ${RESET}"
@@ -1116,18 +1134,43 @@ menu() {
                 check_root
                 check_deps
                 ensure_docker_permission
-                install_docker
-                setup_sandbox
-                setup_openclaw
+                install_full_stack_swarm
                 read -p "Pressione ENTER para continuar..."
                 ;;
             2)
                 check_root
                 check_deps
+                ensure_docker_permission
                 install_docker
+                setup_sandbox
+                setup_openclaw
                 read -p "Pressione ENTER para continuar..."
                 ;;
             3)
+                check_root
+                check_deps
+                install_docker
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            4)
+                check_root
+                run_wizard
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            5)
+                manage_skills
+                ;;
+            6)
+                check_root
+                approve_device
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            7)
+                check_root
+                generate_whatsapp_qrcode
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            8)
                 log_info "Buscando logs do OpenClaw..."
                 
                 # Tenta logs de Swarm Service primeiro
@@ -1153,41 +1196,16 @@ menu() {
                 fi
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            4)
+            9)
                 enter_shell
-                read -p "Pressione ENTER para continuar..."
-                ;;
-            5)
-                manage_skills
-                ;;
-            6)
-                check_root
-                run_wizard
-                read -p "Pressione ENTER para continuar..."
-                ;;
-            7)
-                check_root
-                generate_whatsapp_qrcode
-                read -p "Pressione ENTER para continuar..."
-                ;;
-            8)
-                check_root
-                restart_gateway
                 read -p "Pressione ENTER para continuar..."
                 ;;
             10)
                 check_root
-                check_deps
-                ensure_docker_permission
-                install_full_stack_swarm
+                restart_gateway
                 read -p "Pressione ENTER para continuar..."
                 ;;
             11)
-                check_root
-                approve_device
-                read -p "Pressione ENTER para continuar..."
-                ;;
-            9)
                 check_root
                 cleanup_vps
                 read -p "Pressione ENTER para continuar..."
