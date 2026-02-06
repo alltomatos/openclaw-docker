@@ -161,12 +161,25 @@ check_deps() {
 }
 
 setup_hostname() {
+    local force_setup="$1"
+    
+    # Se já configurado e não forçado, retorna silenciosamente
+    if [ -f "/root/dados_vps/.hostname_configured" ] && [ "$force_setup" != "force" ]; then
+        return
+    fi
+
     header
     echo -e "${AZUL}=== Configuração Inicial ===${RESET}"
     echo ""
     current_hostname=$(hostname)
     echo -e "${BRANCO}Hostname atual: ${VERDE}$current_hostname${RESET}"
     echo ""
+    
+    # Se já configurado, pergunta diferente
+    if [ -f "/root/dados_vps/.hostname_configured" ]; then
+        echo -e "${AMARELO}O hostname já foi configurado anteriormente.${RESET}"
+    fi
+    
     echo -en "${BRANCO}Deseja alterar o hostname? [y/N]: ${RESET}"
     read -r CHANGE_HOST
     
@@ -192,6 +205,9 @@ setup_hostname() {
         log_info "Criando diretório de persistência /root/dados_vps..."
         mkdir -p /root/dados_vps
     fi
+    
+    # Marca como configurado
+    touch /root/dados_vps/.hostname_configured
 }
 
 install_portainer_standalone() {
@@ -2140,6 +2156,7 @@ menu() {
         echo -e "${VERDE}7${BRANCO} - Gerar QR Code WhatsApp${RESET}"
         echo -e "${VERDE}8${BRANCO} - Configurar Modo (Local/Remoto)${RESET}"
         echo -e "${VERDE}9${BRANCO} - Configurar Bind para LAN (Acesso Externo)${RESET}"
+        echo -e "${VERDE}20${BRANCO} - Alterar Hostname${RESET}"
         echo ""
         echo -e "${AZUL}--- Diagnóstico & Logs ---${RESET}"
         echo -e "${VERDE}10${BRANCO} - Verificar Saúde (Doctor)${RESET}"
@@ -2301,6 +2318,11 @@ menu() {
             19)
                 check_root
                 uninstall_docker
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            20)
+                check_root
+                setup_hostname "force"
                 read -p "Pressione ENTER para continuar..."
                 ;;
             0)
