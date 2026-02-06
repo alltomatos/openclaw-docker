@@ -51,7 +51,7 @@ RUN groupadd -r openclaw && useradd -r -g openclaw -m -s /bin/bash -G audio,vide
 # Allow openclaw user to access docker socket (dynamically adjust group if needed in entrypoint)
 # This is crucial for Sandboxing to work
 RUN if ! getent group docker > /dev/null; then \
-      groupadd -g 999 docker || groupadd docker; \
+    groupadd -g 999 docker || groupadd docker; \
     fi && \
     usermod -aG docker openclaw
 
@@ -64,9 +64,6 @@ RUN npm install -g playwright
 
 # Install Playwright system dependencies (requires root)
 RUN npx playwright install-deps
-
-# Copy default configuration
-COPY openclaw.defaults.json /etc/openclaw.defaults.json
 
 # Copy scripts and config
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

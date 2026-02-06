@@ -232,6 +232,7 @@ generate_swarm_config() {
     local domain="$2"
     local auth_hash="$3"
     local gateway_token="$4"
+    local canvas_domain="$5"
     
     log_info "Gerando configuração para Swarm (Traefik na rede $network_name)..."
     
@@ -281,7 +282,12 @@ services:
         - "traefik.http.routers.openclaw.entrypoints=websecure"
         - "traefik.http.routers.openclaw.tls.certresolver=letsencryptresolver"
         - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
-        # Canvas Host (Porta 18793) - Requer subdomínio ou path separado se exposto via Traefik
+        # Canvas Host (Porta 18793)
+        - "traefik.http.routers.openclaw-canvas.rule=Host(\`$canvas_domain\`)"
+        - "traefik.http.routers.openclaw-canvas.entrypoints=web"
+        - "traefik.http.routers.openclaw-canvas.entrypoints=websecure"
+        - "traefik.http.routers.openclaw-canvas.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.openclaw-canvas.loadbalancer.server.port=18793"
     volumes:
       # Persistência via Volumes Nomeados (Padrão Swarm-Native)
       - openclaw_config:/home/openclaw/.openclaw
@@ -1029,6 +1035,18 @@ setup_openclaw() {
             read -r DOMAIN
             [ -z "$DOMAIN" ] && DOMAIN="openclaw.app.localhost"
             
+            # Sugere domínio do canvas baseado no domínio principal
+            local default_canvas_domain=""
+            if [[ "$DOMAIN" == openclaw.* ]]; then
+                default_canvas_domain="${DOMAIN/openclaw./canvas.}"
+            else
+                default_canvas_domain="canvas.$DOMAIN"
+            fi
+            
+            echo -en "${BRANCO}Digite o domínio para o Canvas (ex: $default_canvas_domain): ${RESET}"
+            read -r CANVAS_DOMAIN
+            [ -z "$CANVAS_DOMAIN" ] && CANVAS_DOMAIN="$default_canvas_domain"
+            
             # --- Autenticação ---
             # Token não será gerado aqui, deixaremos o Wizard (onboard) criar.
             local GEN_TOKEN=""
@@ -1078,6 +1096,7 @@ setup_openclaw() {
                     echo "" >> /root/dados_vps/openclaw.txt
                     echo " ACESSO WEB (SWARM):" >> /root/dados_vps/openclaw.txt
                     echo " URL: http://$DOMAIN" >> /root/dados_vps/openclaw.txt
+                    echo " CANVAS URL: http://$CANVAS_DOMAIN" >> /root/dados_vps/openclaw.txt
                     echo " USER: $AUTH_USER" >> /root/dados_vps/openclaw.txt
                     echo " PASS: $AUTH_PASS" >> /root/dados_vps/openclaw.txt
                     echo " NETWORK: $TRAEFIK_NET" >> /root/dados_vps/openclaw.txt
@@ -1106,7 +1125,7 @@ setup_openclaw() {
             chmod 600 /root/dados_vps/openclaw.txt
 
             # Passamos token vazio para iniciar sem configuração e permitir onboard
-            generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH" ""
+            generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH" "" "$CANVAS_DOMAIN"
             
             log_info "Baixando imagem oficial..."
             if ! docker pull watink/openclaw:latest; then
@@ -1234,20 +1253,24 @@ cleanup_vps() {
     fi
 
     # 1. Remover Stack Swarm (se existir)
-    if docker stack ls | grep -q "openclaw"; then
-        log_info "Removendo stack 'openclaw' do Swarm..."
-        docker stack rm openclaw
-        # Aguarda um pouco para garantir que os containers terminem
-        log_info "Aguardando encerramento dos serviços (10s)..."
-        sleep 10
+    if docker stack ls >/dev/null 2>&1; then
+        if docker stack ls | grep -q "openclaw"; then
+            log_info "Removendo stack 'openclaw' do Swarm..."
+            docker stack rm openclaw
+            # Aguarda um pouco para garantir que os containers terminem
+            log_info "Aguardando encerramento dos serviços (10s)..."
+            sleep 10
+        fi
     fi
 
     # 2. Remover Containers Standalone (se existirem)
     if [ -d "$INSTALL_DIR" ]; then
         cd "$INSTALL_DIR" || return
-        if docker compose ls | grep -q "openclaw"; then
-             log_info "Parando e removendo containers Standalone..."
-             docker compose down -v --remove-orphans
+        if docker compose ls >/dev/null 2>&1; then
+            if docker compose ls | grep -q "openclaw"; then
+                 log_info "Parando e removendo containers Standalone..."
+                 docker compose down -v --remove-orphans
+            fi
         fi
     fi
 
@@ -1266,7 +1289,36 @@ cleanup_vps() {
         rm -rf "$INSTALL_DIR"
     fi
 
-    log_success "Limpeza concluída! O OpenClaw foi removido deste servidor."
+    # --- VERIFICAÇÃO FINAL ---
+    log_info "Verificando se a limpeza foi completa..."
+    local errors=0
+
+    # Verifica Containers
+    if docker ps -a --filter "name=openclaw" --format "{{.ID}}" | grep -q .; then
+        log_warn "Ainda existem containers 'openclaw' detectados."
+        errors=$((errors+1))
+    fi
+
+    # Verifica Volumes
+    if docker volume ls --filter "name=openclaw" --format "{{.Name}}" | grep -q .; then
+        log_warn "Ainda existem volumes 'openclaw' detectados."
+        errors=$((errors+1))
+    fi
+
+    # Verifica Diretórios
+    if [ -d "$INSTALL_DIR" ] || [ -d "/root/openclaw" ]; then
+        log_warn "Alguns diretórios não foram removidos."
+        errors=$((errors+1))
+    fi
+
+    if [ $errors -eq 0 ]; then
+        log_success "Limpeza verificada com SUCESSO! Tudo foi removido."
+        log_info "Fechando o menu para limpar cache e estado..."
+        sleep 2
+        exit 0
+    else
+        log_error "A limpeza terminou com $errors pendências. Verifique manualmente."
+    fi
 }
 
 uninstall_docker() {
@@ -1300,8 +1352,34 @@ uninstall_docker() {
     rm -rf /etc/docker
     rm -rf /root/openclaw
     rm -rf /root/dados_vps
+    
+    # Remover instalação do OpenClaw também, já que sem docker não funciona
+    if [ -d "$INSTALL_DIR" ]; then
+         rm -rf "$INSTALL_DIR"
+    fi
 
-    log_success "Docker desinstalado completamente."
+    # --- VERIFICAÇÃO FINAL ---
+    log_info "Verificando desinstalação..."
+    local errors=0
+
+    if command -v docker &> /dev/null; then
+        log_warn "O comando 'docker' ainda está disponível."
+        errors=$((errors+1))
+    fi
+
+    if [ -d "/var/lib/docker" ]; then
+        log_warn "O diretório /var/lib/docker ainda existe."
+        errors=$((errors+1))
+    fi
+
+    if [ $errors -eq 0 ]; then
+        log_success "Docker e OpenClaw foram removidos completamente."
+        log_info "Fechando o menu para limpar cache e estado..."
+        sleep 2
+        exit 0
+    else
+        log_error "A desinstalação pode ter deixado resíduos. Verifique manualmente."
+    fi
 }
 
 
@@ -1445,6 +1523,20 @@ run_wizard() {
              fi
              [ -z "$domain" ] && domain="openclaw.app.localhost"
              
+             # Tentar recuperar domínio do Canvas
+             local canvas_domain=""
+             if [ -f "/root/dados_vps/openclaw.txt" ]; then
+                 canvas_domain=$(grep "CANVAS URL: " /root/dados_vps/openclaw.txt | awk '{print $2}' | sed 's|http://||' | sed 's|https://||' | cut -d/ -f1)
+             fi
+             # Fallback: Se não encontrou, sugere baseado no domínio principal
+             if [ -z "$canvas_domain" ]; then
+                  if [[ "$domain" == openclaw.* ]]; then
+                      canvas_domain="${domain/openclaw./canvas.}"
+                  else
+                      canvas_domain="canvas.$domain"
+                  fi
+             fi
+             
              # Recuperar Rede Traefik
              local network_name=$(detect_swarm_traefik)
              
@@ -1472,7 +1564,7 @@ run_wizard() {
              
              # Regerar arquivo de configuração Swarm com o NOVO TOKEN e atualizar Stack
              if [ -n "$new_token" ]; then
-                 generate_swarm_config "$network_name" "$domain" "$auth_hash" "$new_token"
+                 generate_swarm_config "$network_name" "$domain" "$auth_hash" "$new_token" "$canvas_domain"
                  deploy_stack_via_api "openclaw" "docker-compose.swarm.yml"
              else
                  log_warn "Novo token não encontrado. Forçando apenas restart do serviço..."
@@ -1742,6 +1834,90 @@ run_dashboard() {
     fi
 }
 
+configure_gateway_mode() {
+    header
+    echo -e "${AZUL}=== Configurar Modo de Operação (Gateway Mode) ===${RESET}"
+    echo ""
+    echo -e "${BRANCO}O OpenClaw pode operar em dois modos:${RESET}"
+    echo -e "  1. ${VERDE}Local${RESET}  : Processamento local de mensagens (Padrão para Standalone)."
+    echo -e "  2. ${VERDE}Remote${RESET} : Atua como ponte para outro servidor (Ex: Cloud/SaaS)."
+    echo ""
+    
+    # Tenta pegar container ID
+    local container_id=$(docker ps --filter "name=openclaw" --format "{{.ID}}" | head -n 1)
+    if [ -z "$container_id" ]; then
+        container_id=$(docker ps --filter "name=openclaw_openclaw" --format "{{.ID}}" | head -n 1)
+    fi
+
+    if [ -n "$container_id" ]; then
+        echo -e "Modo atual: $(docker exec "$container_id" openclaw config get gateway.mode 2>/dev/null || echo "Desconhecido")"
+    else
+        echo -e "Modo atual: ${AMARELO}Indisponível (Container offline)${RESET}"
+    fi
+    echo ""
+    
+    echo -en "${BRANCO}Escolha o modo [1-Local / 2-Remote]: ${RESET}"
+    read -r MODE_OPT
+
+    local MODE=""
+    case $MODE_OPT in
+        1) MODE="local" ;;
+        2) MODE="remote" ;;
+        *) 
+           log_error "Opção inválida."
+           return 
+           ;;
+    esac
+
+    log_info "Configurando gateway.mode para: $MODE"
+    
+    if [ -n "$container_id" ]; then
+        docker exec "$container_id" openclaw config set gateway.mode "$MODE"
+        
+        if [ $? -eq 0 ]; then
+            log_success "Modo configurado com sucesso para '$MODE'."
+            
+            echo -en "${BRANCO}Deseja reiniciar o Gateway agora para aplicar? [Y/n]: ${RESET}"
+            read -r RESTART_NOW
+            if [[ "$RESTART_NOW" =~ ^[Yy]$ || -z "$RESTART_NOW" ]]; then
+                restart_gateway
+            fi
+        else
+            log_error "Falha ao configurar modo."
+        fi
+    else
+        log_error "Container OpenClaw não encontrado. Certifique-se que o sistema está rodando."
+    fi
+}
+
+push_to_hub_menu() {
+    header
+    echo -e "${AZUL}=== Enviar Imagem para DockerHub ===${RESET}"
+    echo ""
+    echo -e "${BRANCO}Esta opção irá reconstruir a imagem e enviá-la para o DockerHub.${RESET}"
+    echo -e "${BRANCO}Certifique-se de estar logado no Docker (${VERDE}docker login${RESET})${BRANCO}.${RESET}"
+    echo ""
+    echo -en "${BRANCO}Digite seu usuário do DockerHub (ex: watink): ${RESET}"
+    read -r DOCKER_USER
+    
+    if [ -z "$DOCKER_USER" ]; then
+        log_error "Usuário não informado."
+        return
+    fi
+    
+    echo ""
+    log_info "Iniciando processo de push para usuário: $DOCKER_USER"
+    
+    if [ -f "$INSTALL_DIR/push_to_hub.sh" ]; then
+        cd "$INSTALL_DIR" || return
+        # Garante permissão de execução
+        chmod +x push_to_hub.sh
+        ./push_to_hub.sh "$DOCKER_USER"
+    else
+        log_error "Script push_to_hub.sh não encontrado em $INSTALL_DIR"
+    fi
+}
+
 # --- Menu Principal ---
 
 menu() {
@@ -1749,32 +1925,36 @@ menu() {
         header
         echo -e "${BRANCO}Selecione uma opção:${RESET}"
         echo ""
-        echo -e "${AZUL}--- Instalação ---${RESET}"
-        echo -e "${VERDE}1${BRANCO} - Instalação Completa (Swarm + Portainer + Traefik + OpenClaw)${RESET}"
-        echo -e "${VERDE}2${BRANCO} - Instalar OpenClaw (Standalone ou Cluster Existente)${RESET}"
+        echo -e "${AZUL}--- Instalação & Setup ---${RESET}"
+        echo -e "${VERDE}1${BRANCO} - Instalação Completa (Swarm + Portainer + Traefik)${RESET}"
+        echo -e "${VERDE}2${BRANCO} - Instalação Standalone (Padrão)${RESET}"
         echo -e "${VERDE}3${BRANCO} - Apenas Instalar Docker${RESET}"
         echo ""
-        echo -e "${AZUL}--- Pós-Instalação & Configuração ---${RESET}"
-        echo -e "${VERDE}4${BRANCO} - Setup Wizard (Onboard Oficial)${RESET}"
+        echo -e "${AZUL}--- Configuração & Gestão ---${RESET}"
+        echo -e "${VERDE}4${BRANCO} - Wizard de Configuração (Onboard)${RESET}"
         echo -e "${VERDE}5${BRANCO} - Gerenciar Skills (Plugins)${RESET}"
-        echo -e "${VERDE}6${BRANCO} - Gerenciar Dispositivos (Aprovar Pairing)${RESET}"
+        echo -e "${VERDE}6${BRANCO} - Gerenciar Dispositivos (Pairing)${RESET}"
         echo -e "${VERDE}7${BRANCO} - Gerar QR Code WhatsApp${RESET}"
-        echo -e "${VERDE}17${BRANCO} - Configurar Bind para LAN (Corrigir Acesso)${RESET}"
+        echo -e "${VERDE}8${BRANCO} - Configurar Modo (Local/Remoto)${RESET}"
+        echo -e "${VERDE}9${BRANCO} - Configurar Bind para LAN (Acesso Externo)${RESET}"
         echo ""
-        echo -e "${AZUL}--- Diagnóstico & Monitoramento ---${RESET}"
-        echo -e "${VERDE}8${BRANCO} - Verificar Saúde do Sistema (Doctor)${RESET}"
-        echo -e "${VERDE}9${BRANCO} - Verificar Status do Gateway${RESET}"
-        echo -e "${VERDE}10${BRANCO} - Abrir Dashboard CLI${RESET}"
-        echo -e "${VERDE}11${BRANCO} - Ver Logs do OpenClaw${RESET}"
+        echo -e "${AZUL}--- Diagnóstico & Logs ---${RESET}"
+        echo -e "${VERDE}10${BRANCO} - Verificar Saúde (Doctor)${RESET}"
+        echo -e "${VERDE}11${BRANCO} - Status do Gateway${RESET}"
+        echo -e "${VERDE}12${BRANCO} - Dashboard CLI${RESET}"
+        echo -e "${VERDE}13${BRANCO} - Ver Logs do OpenClaw${RESET}"
         echo ""
-        echo -e "${AZUL}--- Utilitários ---${RESET}"
-        echo -e "${VERDE}12${BRANCO} - Acessar Terminal do Container${RESET}"
-        echo -e "${VERDE}13${BRANCO} - Reiniciar Gateway${RESET}"
-        echo -e "${VERDE}14${BRANCO} - Exibir Dados de Conexão (Token/URL)${RESET}"
+        echo -e "${AZUL}--- Ferramentas & Acesso ---${RESET}"
+        echo -e "${VERDE}14${BRANCO} - Terminal do Container${RESET}"
+        echo -e "${VERDE}15${BRANCO} - Reiniciar Gateway${RESET}"
+        echo -e "${VERDE}16${BRANCO} - Exibir Dados de Conexão (Token)${RESET}"
         echo ""
-        echo -e "${AZUL}--- Sistema ---${RESET}"
-        echo -e "${VERMELHO}15${BRANCO} - Limpar VPS (Desinstalar OpenClaw)${RESET}"
-        echo -e "${VERMELHO}16${BRANCO} - Desinstalar Docker (Remove TUDO)${RESET}"
+        echo -e "${AZUL}--- Desenvolvimento ---${RESET}"
+        echo -e "${VERDE}17${BRANCO} - Enviar Imagem para DockerHub (Build & Push)${RESET}"
+        echo ""
+        echo -e "${AZUL}--- Sistema (Danger Zone) ---${RESET}"
+        echo -e "${VERMELHO}18${BRANCO} - Limpar VPS (Remover OpenClaw)${RESET}"
+        echo -e "${VERMELHO}19${BRANCO} - Desinstalar Docker (Remover TUDO)${RESET}"
         echo -e "${VERDE}0${BRANCO} - Sair${RESET}"
         echo ""
         echo -en "${AMARELO}Opção: ${RESET}"
@@ -1822,25 +2002,31 @@ menu() {
                 generate_whatsapp_qrcode
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            17)
+            8)
+                check_root
+                check_deps
+                configure_gateway_mode
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            9)
                 check_root
                 check_deps
                 force_bind_lan
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            8)
+            10)
                 run_doctor
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            9)
+            11)
                 run_status
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            10)
+            12)
                 run_dashboard
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            11)
+            13)
                 log_info "Buscando logs do OpenClaw..."
                 
                 # Tenta logs de Swarm Service primeiro
@@ -1866,27 +2052,32 @@ menu() {
                 fi
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            12)
+            14)
                 enter_shell
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            13)
+            15)
                 check_root
                 restart_gateway
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            14)
+            16)
                 check_root
                 echo -e "${AZUL}Sincronizando e exibindo informações de conexão...${RESET}"
                 setup_security_config "" ""
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            15)
+            17)
+                check_root
+                push_to_hub_menu
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            18)
                 check_root
                 cleanup_vps
                 read -p "Pressione ENTER para continuar..."
                 ;;
-            16)
+            19)
                 check_root
                 uninstall_docker
                 read -p "Pressione ENTER para continuar..."
