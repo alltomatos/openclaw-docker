@@ -451,6 +451,105 @@ wait_stack() {
     done
 }
 
+deploy_stack_via_api() {
+    local stack_name="$1"
+    local compose_file="$2"
+    
+    # Tenta recuperar credenciais/configuração do Portainer se não estiverem no escopo
+    local p_domain="$PORTAINER_DOMAIN"
+    local p_user="$PORTAINER_USER"
+    local p_pass="$PORTAINER_PASS"
+    local token=""
+    
+    if [ -f "/root/dados_vps/dados_portainer.txt" ]; then
+        local p_url_file=$(grep "URL: " /root/dados_vps/dados_portainer.txt | awk '{print $2}')
+        if [ -n "$p_url_file" ]; then
+            p_domain=$(echo "$p_url_file" | sed 's|https://||' | sed 's|http://||')
+        fi
+        
+        # Tenta pegar token do arquivo
+        local token_file=$(grep "Token: " /root/dados_vps/dados_portainer.txt | awk '{print $2}')
+        if [ -n "$token_file" ]; then
+            token="$token_file"
+        fi
+        
+        # Se não tem user/pass no escopo, tenta pegar do arquivo
+        if [ -z "$p_user" ]; then
+            p_user=$(grep "User: " /root/dados_vps/dados_portainer.txt | awk '{print $2}')
+        fi
+        if [ -z "$p_pass" ]; then
+            p_pass=$(grep "Pass: " /root/dados_vps/dados_portainer.txt | awk '{print $2}')
+        fi
+    fi
+    
+    # Se não temos domínio, não dá pra usar API
+    if [ -z "$p_domain" ]; then
+        log_info "Domínio do Portainer não identificado. Usando deploy via CLI."
+        docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+        return
+    fi
+    
+    local portainer_url="https://$p_domain"
+    
+    # Se não temos token, tenta gerar
+    if [ -z "$token" ] && [ -n "$p_user" ] && [ -n "$p_pass" ]; then
+         log_info "Gerando token temporário para deploy via API..."
+         token=$(curl -k -s --resolve "$p_domain:443:127.0.0.1" -X POST "$portainer_url/api/auth" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"$p_user\",\"password\":\"$p_pass\"}" | jq -r .jwt)
+    fi
+
+    if [ -z "$token" ] || [ "$token" == "null" ]; then
+        log_warn "Não foi possível autenticar na API do Portainer. Usando deploy via CLI."
+        docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+        return
+    fi
+
+    # Obter Endpoint ID (assume local/primary como o primeiro endpoint)
+    local endpoint_id=$(curl -k -s -H "Authorization: Bearer $token" --resolve "$p_domain:443:127.0.0.1" "$portainer_url/api/endpoints" | jq -r '.[0].Id')
+    
+    if [ -z "$endpoint_id" ] || [ "$endpoint_id" == "null" ]; then
+         log_warn "Falha ao obter Endpoint ID. Usando deploy via CLI."
+         docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+         return
+    fi
+    
+    # Obter Swarm ID
+    local swarm_id=$(curl -k -s -H "Authorization: Bearer $token" --resolve "$p_domain:443:127.0.0.1" "$portainer_url/api/endpoints/$endpoint_id/docker/swarm" | jq -r .ID)
+
+    log_info "Tentando deploy via Portainer API (Stack: $stack_name, Endpoint: $endpoint_id)..."
+    
+    # Arquivos temporários para capturar saída
+    local response_output=$(mktemp)
+    local error_output=$(mktemp)
+    
+    # API Request para criar stack
+    local http_code=$(curl -s -o "$response_output" -w "%{http_code}" -k -X POST \
+    -H "Authorization: Bearer $token" \
+    --resolve "$p_domain:443:127.0.0.1" \
+    -F "Name=$stack_name" \
+    -F "file=@$(pwd)/$compose_file" \
+    -F "SwarmID=$swarm_id" \
+    -F "endpointId=$endpoint_id" \
+    "$portainer_url/api/stacks/create/swarm/file" 2> "$error_output")
+    
+    if [ "$http_code" -eq 200 ]; then
+        log_success "Deploy da stack '$stack_name' realizado com SUCESSO via Portainer API!"
+        log_info "A stack agora deve aparecer como 'Total Control' no Portainer."
+    elif [ "$http_code" -eq 409 ]; then
+        log_warn "Stack '$stack_name' já existe no Portainer (Conflito). Atualizando via CLI..."
+        docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+    else
+        log_error "Erro no deploy via API (HTTP $http_code)."
+        log_error "Resposta: $(cat $response_output)"
+        log_error "Detalhes: $(cat $error_output)"
+        log_info "Tentando fallback via CLI..."
+        docker stack deploy --prune --resolve-image always -c "$compose_file" "$stack_name"
+    fi
+    
+    rm -f "$response_output" "$error_output"
+}
+
 # --- Instalação Completa (Swarm + Portainer + Traefik) ---
 
 install_full_stack_swarm() {
@@ -837,7 +936,7 @@ setup_openclaw() {
             
             log_info "Realizando deploy da Stack..."
             # Usa APENAS o arquivo Swarm gerado (que agora é completo), evitando conflitos com 'profiles' do docker-compose.yml
-            docker stack deploy -c docker-compose.swarm.yml openclaw
+            deploy_stack_via_api "openclaw" "docker-compose.swarm.yml"
             
             if [ $? -eq 0 ]; then
                 log_success "OpenClaw implantado no Swarm!"
