@@ -647,6 +647,7 @@ run_wizard() {
 
     log_info "Executando 'openclaw onboard' via container temporário..."
     echo -e "${AMARELO}Siga as instruções na tela. Pressione Ctrl+C para cancelar.${RESET}"
+    echo -e "${AMARELO}O assistente pode demorar alguns instantes para iniciar. Por favor, aguarde...${RESET}"
     echo ""
     
     # Executa o serviço CLI definido no docker-compose.yml
