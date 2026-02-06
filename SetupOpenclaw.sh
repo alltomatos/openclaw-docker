@@ -26,7 +26,7 @@ header() {
     echo -e "${AZUL}##                                         SETUP OPENCLAW                                      ##${RESET}"
     echo -e "${AZUL}## // ## // ## // ## // ## // ## // ## // ## //## // ## // ## // ## // ## // ## // ## // ## // ##${RESET}"
     echo ""
-    echo -e "                           ${BRANCO}Versão do Instalador: ${VERDE}v1.3.0${RESET}                "
+    echo -e "                           ${BRANCO}Versão do Instalador: ${VERDE}v1.5.0${RESET}                "
     echo -e "${VERDE}     ${BRANCO}<- Desenvolvido por AllTomatos ->     ${VERDE}github.com/alltomatos/openclaw-docker${RESET}"
     echo ""
 }
