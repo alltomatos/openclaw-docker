@@ -2339,4 +2339,7 @@ menu() {
 # Execução
 check_root
 setup_hostname
+echo ""
+echo -e "${VERDE}Configuração inicial concluída. Carregando menu...${RESET}"
+sleep 2
 menu
