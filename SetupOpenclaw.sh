@@ -959,7 +959,11 @@ setup_openclaw() {
                 echo -e "Acesse em: ${VERDE}https://$DOMAIN/?token=$final_token${RESET}"
                 
                 echo ""
-                echo -e "${AMARELO}IMPORTANTE: Para concluir a instalação, execute a opção '4 - Setup Wizard' no menu principal.${RESET}"
+                echo -e "${AMARELO}IMPORTANTE: Para concluir a instalação, siga os passos abaixo:${RESET}"
+                echo -e "${BRANCO}1. Execute o processo de integração:${RESET} ${VERDE}openclaw onboard --install-daemon${RESET} (Use a Opção 4 do Menu)"
+                echo -e "${BRANCO}2. Verificação rápida:${RESET} ${VERDE}openclaw doctor${RESET} (Via terminal do container - Opção 9)"
+                echo -e "${BRANCO}3. Verificar integridade:${RESET} ${VERDE}openclaw status${RESET} + ${VERDE}openclaw health${RESET}"
+                echo -e "${BRANCO}4. Painel de controle:${RESET} ${VERDE}openclaw dashboard${RESET} (Ou acesse a URL acima)"
                 echo ""
             else
                 log_error "Falha no deploy Swarm."
@@ -988,7 +992,11 @@ setup_openclaw() {
         echo -e "  - Adicionar Skill: ${VERDE}./add_skill.sh <url_git>${RESET}"
         echo -e "  - Scan Manual: ${VERDE}docker compose exec openclaw /usr/local/bin/scan_skills.sh${RESET}"
         echo ""
-        echo -e "${AMARELO}IMPORTANTE: Para concluir a instalação, execute a opção '4 - Setup Wizard' no menu principal.${RESET}"
+        echo -e "${AMARELO}IMPORTANTE: Para concluir a instalação, siga os passos abaixo:${RESET}"
+        echo -e "${BRANCO}1. Execute o processo de integração:${RESET} ${VERDE}openclaw onboard --install-daemon${RESET} (Use a Opção 4 do Menu)"
+        echo -e "${BRANCO}2. Verificação rápida:${RESET} ${VERDE}openclaw doctor${RESET} (Via terminal do container - Opção 9)"
+        echo -e "${BRANCO}3. Verificar integridade:${RESET} ${VERDE}openclaw status${RESET} + ${VERDE}openclaw health${RESET}"
+        echo -e "${BRANCO}4. Painel de controle:${RESET} ${VERDE}openclaw dashboard${RESET} (Ou acesse via browser)"
         echo ""
     else
         log_error "Falha ao iniciar o OpenClaw."
@@ -1009,7 +1017,9 @@ enter_shell() {
         
         echo ""
         echo -e "${BRANCO}Comandos internos disponíveis no OpenClaw:${RESET}"
-        echo -e "  - ${VERDE}openclaw onboard --install-daemon${RESET} : Instala o daemon do sistema"
+        echo -e "  - ${VERDE}openclaw onboard --install-daemon${RESET} : Executar o processo de integração"
+        echo -e "  - ${VERDE}openclaw doctor${RESET}                   : Verificação rápida do sistema"
+        echo -e "  - ${VERDE}openclaw status${RESET} + ${VERDE}health${RESET}      : Verificar integridade do gateway"
         echo -e "  - ${VERDE}openclaw channels login --channel whatsapp${RESET} : Gera QRCode do WhatsApp"
         echo -e "  - ${VERDE}openclaw gateway restart${RESET}          : Reinicia o gateway (útil após conectar)"
         echo -e "  - ${VERDE}/usr/local/bin/scan_skills.sh${RESET}     : Escaneia e instala novas skills"
