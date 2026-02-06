@@ -1215,6 +1215,9 @@ run_wizard() {
         return
     fi
     
+    # GARANTE que o volume correto seja usado pelo docker-compose
+    export OPENCLAW_CONFIG_PATH="/root/openclaw/.openclaw"
+    
     cd "$INSTALL_DIR" || return
     
     # Verifica se a imagem existe
