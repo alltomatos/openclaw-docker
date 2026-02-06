@@ -1,25 +1,36 @@
 services:
-  openclaw:
+  openclaw-gateway:
     image: watink/openclaw:latest
-    container_name: openclaw
+    container_name: openclaw-gateway
     restart: unless-stopped
     ports:
       - "18789:18789"
-    volumes:
+      # Porta do Canvas Host (A2UI/HTML editável pelo agente)
+      - "18793:18793"
+    volumes: &openclaw-volumes
       # Configuração (chaves, sessões, canais) - Mapeado para host (Padrão: ./data/config ou /root/openclaw/config)
       - ${OPENCLAW_CONFIG_PATH:-./data/config}:/home/openclaw/.openclaw
       # Mapeamento local de skills para instalação segura
       - ./skills:/home/openclaw/.openclaw/workspace/skills
-      # [Opcional] Mapeamento para persistência total
-      # - openclaw_home:/home/openclaw
-      # [Exemplo de Bind Mount para Windows/Host]
-      # Descomente para acessar os arquivos do workspace diretamente no seu Windows
-      # - ./workspace_data:/home/openclaw/.openclaw/workspace
+      # Socket do Docker para Sandboxing (opcional, mas recomendado para isolamento)
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       # Desabilita mDNS (Bonjour) para evitar anúncios na rede (OpSec/Produção)
       - OPENCLAW_DISABLE_BONJOUR=1
-      # Define explicitamente onde o OpenClaw deve trabalhar
-      # - OPENCLAW_WORKSPACE=/home/openclaw/workspace
+      # Token de Autenticação Estático (Opcional - para automação/headless)
+      # Se definido, o Gateway exigirá este token para conexão.
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
+
+  # Serviço auxiliar para rodar comandos CLI (onboard, install, etc)
+  # Uso: docker compose run --rm openclaw-cli onboard
+  openclaw-cli:
+    image: watink/openclaw:latest
+    container_name: openclaw-cli
+    profiles: ["cli"]
+    entrypoint: ["openclaw"]
+    volumes: *openclaw-volumes
+    environment:
+      - OPENCLAW_DISABLE_BONJOUR=1
 
 volumes:
   openclaw_home:

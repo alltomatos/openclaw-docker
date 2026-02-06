@@ -1,0 +1,38 @@
+{
+  "agents": {
+    "defaults": {
+      "sandbox": {
+        "mode": "all",
+        "workspaceAccess": "rw"
+      },
+      "llm": {
+        "provider": "openai",
+        "model": "gpt-4o"
+      }
+    }
+  },
+  "llm": {
+    "providers": {
+      "openai": {
+        "apiKey": "sk-YOUR_OPENAI_KEY_HERE"
+      },
+      "anthropic": {
+        "apiKey": "sk-ant-YOUR_ANTHROPIC_KEY_HERE"
+      }
+    }
+  },
+  "channels": {
+    "whatsapp": {
+      "dmPolicy": "allowlist",
+      "allowFrom": ["+5511999999999"]
+    }
+  },
+  "tools": {
+    "elevated": {
+      "enabled": true
+    }
+  },
+  "gateway": {
+    "trustedProxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1", "::1"]
+  }
+}

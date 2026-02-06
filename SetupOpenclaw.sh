@@ -60,6 +60,16 @@ check_root() {
     fi
 }
 
+# Adiciona o usuário atual ao grupo docker se necessário
+ensure_docker_permission() {
+    # Verifica GID do grupo docker no host
+    DOCKER_GID=$(getent group docker | cut -d: -f3)
+    if [ -n "$DOCKER_GID" ]; then
+        # Exporta GID para ser usado no build/run se necessário
+        export DOCKER_GID_HOST=$DOCKER_GID
+    fi
+}
+
 check_deps() {
     log_info "Verificando dependências básicas..."
     local deps=("curl" "git" "jq")
@@ -148,6 +158,9 @@ services:
         - "traefik.http.routers.openclaw.rule=Host(\`$domain\`)"
         - "traefik.http.routers.openclaw.entrypoints=web"
         - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
+        # Canvas Host (Porta 18793) - Requer subdomínio ou path separado se exposto via Traefik
+        # Por simplicidade, não estamos expondo o Canvas via Traefik por padrão no Swarm
+        # pois requer configuração de WebSocket específica.
     environment:
       - OPENCLAW_DISABLE_BONJOUR=1
 $middleware_config
@@ -293,6 +306,27 @@ install_initial_skills() {
     fi
 }
 
+# Variáveis de Ambiente (Padrão Oficial)
+# OPENCLAW_DOCKER_APT_PACKAGES: Pacotes apt extras para instalar no build
+OPENCLAW_DOCKER_APT_PACKAGES="${OPENCLAW_DOCKER_APT_PACKAGES:-}"
+
+# Função para build da imagem
+build_image() {
+    log_info "Construindo imagem Docker ($IMAGE_NAME)..."
+    if [ -n "$OPENCLAW_DOCKER_APT_PACKAGES" ]; then
+        log_info "Pacotes extras detectados: $OPENCLAW_DOCKER_APT_PACKAGES"
+    fi
+    
+    if docker build \
+        --build-arg OPENCLAW_DOCKER_APT_PACKAGES="$OPENCLAW_DOCKER_APT_PACKAGES" \
+        -t "$IMAGE_NAME" .; then
+        log_success "Imagem construída com sucesso."
+    else
+        log_error "Falha ao construir imagem."
+        exit 1
+    fi
+}
+
 # --- Instalação do OpenClaw ---
 
 setup_openclaw() {
@@ -426,7 +460,7 @@ enter_shell() {
     log_info "Tentando acessar o shell do container OpenClaw..."
     
     # Tenta encontrar container local (funciona para Standalone e Swarm se estiver no node atual)
-    # Filtra por nome que contenha 'openclaw' (ex: openclaw-openclaw-1 ou openclaw_openclaw.1.xxx)
+    # Filtra por nome que contenha 'openclaw' (ex: openclaw-openclaw-gateway-1 ou openclaw_openclaw.1.xxx)
     local container_id=$(docker ps --filter "name=openclaw" --format "{{.ID}}" | head -n 1)
     
     if [ -n "$container_id" ]; then
@@ -504,6 +538,80 @@ cleanup_vps() {
     fi
 
     log_success "Limpeza concluída! O OpenClaw foi removido deste servidor."
+}
+
+# --- Setup Sandbox ---
+# Constrói a imagem base de sandbox necessária para execução isolada de tools
+setup_sandbox() {
+    log_info "Configurando ambiente de Sandbox (Docker-in-Docker)..."
+    
+    # Verifica se a imagem base de sandbox já existe
+    if docker image inspect openclaw-sandbox:bookworm-slim >/dev/null 2>&1; then
+        log_info "Imagem de sandbox 'openclaw-sandbox:bookworm-slim' já existe."
+    else
+        log_info "Construindo imagem base de sandbox (openclaw-sandbox:bookworm-slim)..."
+        # Cria um Dockerfile temporário para a sandbox se necessário, 
+        # ou usa o script oficial se estivesse disponível.
+        # Como fallback, vamos criar uma imagem mínima baseada em debian:bookworm-slim
+        
+        TEMP_DIR=$(mktemp -d)
+        cat <<EOF > "$TEMP_DIR/Dockerfile"
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd -m -s /bin/bash sandbox
+USER sandbox
+WORKDIR /home/sandbox
+EOF
+        
+        if docker build -t openclaw-sandbox:bookworm-slim "$TEMP_DIR"; then
+            log_success "Imagem de sandbox construída com sucesso."
+        else
+            log_error "Falha ao construir imagem de sandbox."
+        fi
+        rm -rf "$TEMP_DIR"
+    fi
+}
+
+# --- Wizard Oficial ---
+
+run_wizard() {
+    log_info "Iniciando Wizard de Configuração Oficial (Onboard)..."
+    
+    if [ ! -d "$INSTALL_DIR" ]; then
+        log_error "Diretório de instalação não encontrado ($INSTALL_DIR). Instale o OpenClaw primeiro."
+        return
+    fi
+    
+    cd "$INSTALL_DIR" || return
+    
+    # Verifica se a imagem existe
+    if ! docker image inspect watink/openclaw:latest >/dev/null 2>&1; then
+        log_info "Imagem não encontrada. Baixando/Construindo..."
+        docker compose pull || build_image
+    fi
+    
+    # Garante que os diretórios de persistência existem e têm permissão correta
+    prepare_persistence
+
+    log_info "Executando 'openclaw onboard' via container temporário..."
+    echo -e "${AMARELO}Siga as instruções na tela. Pressione Ctrl+C para cancelar.${RESET}"
+    echo ""
+    
+    # Executa o serviço CLI definido no docker-compose.yml
+    docker compose run --rm openclaw-cli onboard
+    
+    if [ $? -eq 0 ]; then
+        log_success "Wizard concluído com sucesso."
+        echo -e "${VERDE}Reiniciando gateway para aplicar alterações...${RESET}"
+        docker compose restart openclaw-gateway
+    else
+        log_error "Wizard cancelado ou falhou."
+    fi
 }
 
 # --- Gerenciamento de Skills ---
@@ -594,7 +702,8 @@ menu() {
         echo -e "${VERDE}3${BRANCO} - Ver Logs do OpenClaw${RESET}"
         echo -e "${VERDE}4${BRANCO} - Acessar Terminal do Container${RESET}"
         echo -e "${VERDE}5${BRANCO} - Gerenciar Skills (Plugins)${RESET}"
-        echo -e "${VERMELHO}6${BRANCO} - Limpar VPS (Remover OpenClaw)${RESET}"
+        echo -e "${VERDE}6${BRANCO} - Rodar Setup Wizard (Onboard Oficial)${RESET}"
+        echo -e "${VERMELHO}7${BRANCO} - Limpar VPS (Remover OpenClaw)${RESET}"
         echo -e "${VERDE}0${BRANCO} - Sair${RESET}"
         echo ""
         echo -en "${AMARELO}Opção: ${RESET}"
@@ -604,7 +713,9 @@ menu() {
             1)
                 check_root
                 check_deps
+                ensure_docker_permission
                 install_docker
+                setup_sandbox
                 setup_openclaw
                 read -p "Pressione ENTER para continuar..."
                 ;;
@@ -648,6 +759,11 @@ menu() {
                 manage_skills
                 ;;
             6)
+                check_root
+                run_wizard
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            7)
                 check_root
                 cleanup_vps
                 read -p "Pressione ENTER para continuar..."

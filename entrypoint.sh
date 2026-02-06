@@ -6,11 +6,22 @@ CONFIG_DIR="/home/openclaw/.openclaw"
 CONFIG_FILE="$CONFIG_DIR/openclaw.json"
 WORKSPACE_DIR="$CONFIG_DIR/workspace"
 
-# Ensure directories exist
+# Create config directory if it doesn't exist
 if [ ! -d "$CONFIG_DIR" ]; then
+    echo "Creating config directory: $CONFIG_DIR"
     mkdir -p "$CONFIG_DIR"
 fi
 
+# Ensure Python dependencies directory exists (for persistence)
+if [ -n "$PYTHONUSERBASE" ]; then
+    if [ ! -d "$PYTHONUSERBASE" ]; then
+        echo "Creating Python dependencies directory: $PYTHONUSERBASE"
+        mkdir -p "$PYTHONUSERBASE"
+    fi
+    chown -R openclaw:openclaw "$PYTHONUSERBASE"
+fi
+
+# Ensure workspace directory exists
 if [ ! -d "$WORKSPACE_DIR" ]; then
     mkdir -p "$WORKSPACE_DIR"
 fi
@@ -37,11 +48,22 @@ fi
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "----------------------------------------------------------------"
     echo "⚠️  OpenClaw Configuration Missing ⚠️"
+    echo "Initializing with secure defaults (Sandboxing: All)..."
+    
+    if [ -f "/etc/openclaw.defaults.json" ]; then
+        cp "/etc/openclaw.defaults.json" "$CONFIG_FILE"
+        chown openclaw:openclaw "$CONFIG_FILE"
+        echo "✅ Created $CONFIG_FILE with default secure policy."
+    else
+        echo "❌ Default configuration template not found!"
+    fi
+    
     echo ""
-    echo "To configure OpenClaw (add LLM keys, channels, etc.), run:"
-    echo "  docker compose exec openclaw openclaw onboard"
+    echo "To complete configuration (add LLM keys, channels, etc.), run:"
+    echo "  docker compose run --rm openclaw-cli configure"
+    echo "  (Use 'configure' to edit existing settings without overwriting defaults)"
     echo ""
-    echo "The Gateway will start now, but might require configuration."
+    echo "The Gateway will start now with limited functionality."
     echo "----------------------------------------------------------------"
 fi
 

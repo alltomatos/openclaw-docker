@@ -78,19 +78,42 @@ docker compose up -d
 
 ### 2. Configuração Inicial (Onboarding)
 Se for a primeira vez, você precisará configurar suas chaves de API (LLM) e canais.
-Você pode fazer isso de duas formas:
+O sistema já inicia com uma **política de segurança padrão** (Sandboxing: All, Tool Policy: Safe).
 
-**Opção A: Via comando direto (Host)**
+Você pode configurar suas chaves de duas formas:
+
+**Opção A: Via CLI dedicado (Recomendado)**
 ```bash
-docker compose exec openclaw openclaw onboard
+# Para configuração inicial ou ajustes (mantém defaults seguros)
+docker compose run --rm openclaw-cli configure
 ```
 
-**Opção B: Via Terminal Interativo**
-Selecione a **opção 4** no menu do `SetupOpenclaw.sh` ou entre manualmente no container. Ao entrar, você verá uma lista de comandos úteis:
+**Nota:** O comando `onboard` é destinado a instalações limpas. Como o container já inicia com uma configuração segura (`openclaw.json` gerado a partir de defaults), use `configure` para ajustar chaves de API e canais sem perder as políticas de segurança.
 
-![OpenClaw Container Terminal](./imagem/container.png)
+**Opção B: Via Terminal do Gateway**
+```bash
+docker compose exec openclaw-gateway openclaw onboard
+```
 
-> **Nota:** O terminal de manutenção abre como `root` para permitir instalações e ajustes, mas a aplicação OpenClaw roda em background como usuário seguro `openclaw` (via `gosu` no entrypoint).
+**Opção C: Via Terminal Interativo (Menu)**
+Selecione a **opção 4** no menu do `SetupOpenclaw.sh`.
+
+### 🛡️ Política de Segurança e Sandboxing
+Por padrão, este instalador configura o OpenClaw em modo **Secure by Default**:
+- **Sandboxing:** Ativado para **TODAS** as sessões (`agents.defaults.sandbox.mode: "all"`).
+- **Workspace:** Permissão de escrita (`rw`) para que as tools possam trabalhar.
+- **Modo Elevado:** Habilitado para administradores (`tools.elevated.enabled: true`).
+
+Se precisar ajustar, edite o arquivo `openclaw.json` gerado em `/root/openclaw/config/openclaw.json` (ou `./data/config` localmente).
+
+### 🔑 Autenticação Avançada (Headless/Automação)
+Para instalações automatizadas onde você não pode rodar o onboarding interativo, você pode pré-definir um token mestre via variável de ambiente. Isso está em conformidade com o **Protocolo Gateway**, permitindo que clientes (CLI/UI) se conectem imediatamente se possuírem o token.
+
+No `docker-compose.yml` (ou via `.env`), defina:
+```bash
+OPENCLAW_GATEWAY_TOKEN=seu-token-super-seguro-aqui
+```
+Com isso, qualquer cliente que apresentar este token no handshake WebSocket será autenticado como Admin/Operator.
 
 ### 📱 Canais e Configuração (Channels)
 
@@ -127,6 +150,7 @@ Exemplo de configuração segura para produção:
 {
   "channels": {
     "whatsapp": {
+      "dmPolicy": "allowlist",
       "allowFrom": ["+5511999999999"], // Lista de permissão (DMs)
       "groups": {
         "*": { "requireMention": true } // Em grupos, só responde se mencionado
@@ -248,6 +272,11 @@ docker build -t watink/openclaw:latest .
 
 ## 📂 Volumes e Persistência
 
+### 1. Portas
+- **18789 (Gateway):** Porta principal para API e WebSockets (Control UI, CLI, Nodes).
+- **18793 (Canvas Host):** Porta para o Live Canvas (interface HTML/A2UI editável pelo agente).
+
+### 2. Volumes
 Para garantir que seus dados estejam seguros e acessíveis, o instalador configura automaticamente a persistência no host:
 
 | Volume | Caminho no Container | Caminho no Host (Produção/Setup) | Caminho Local (Dev/Manual) |
@@ -277,3 +306,19 @@ docker compose exec openclaw pm2 status
 ```bash
 docker compose exec openclaw cat /home/openclaw/workspace/skill_scan.log
 ```
+
+### 🛡️ Segurança (OpSec)
+Este instalador implementa as seguintes práticas recomendadas:
+1.  **Usuário não-root:** O container roda como usuário `openclaw` (UID 1000) para minimizar a superfície de ataque.
+2.  **Trusted Proxies:** Configura automaticamente `gateway.trustedProxies` para permitir conexões de redes locais (10.0.0.0/8, 172.16.0.0/12, etc) e Docker.
+3.  **Token de Autenticação:** Gera um token seguro (`gateway.auth.token`) no primeiro setup, bloqueando acessos não autorizados.
+4.  **mDNS Desativado:** `OPENCLAW_DISABLE_BONJOUR=1` evita anúncios na rede local, ideal para VPS/Cloud.
+5.  **Sandboxing (Docker-in-Docker):** Suporte nativo para execução segura de tools em containers isolados. O setup cria automaticamente a imagem `openclaw-sandbox:bookworm-slim` e mapeia o socket do Docker.
+
+### 🏗️ Arquitetura
+- **Gateway Único:** Um único Gateway gerencia todas as conexões (WhatsApp, Telegram, etc).
+- **Protocolo WebSocket:** Toda comunicação (CLI, UI, Nodes) ocorre via WS na porta 18789.
+- **Canvas Host:** A porta 18793 serve interfaces visuais geradas pelos agentes (A2UI).
+- **Isolamento de Skills:** Skills rodam no mesmo container mas com dependências gerenciadas em volumes persistentes.
+
+## 🤝 Contribuindo

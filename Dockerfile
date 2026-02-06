@@ -4,6 +4,9 @@ FROM ubuntu:24.04
 # Avoid prompts from apt
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Define build argument for extra packages (Official compatibility)
+ARG OPENCLAW_DOCKER_APT_PACKAGES=""
+
 # Install dependencies
 # - dumb-init: handles PID 1 signals correctly
 # - libvips-dev: for sharp (image processing) optimization
@@ -18,6 +21,8 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     build-essential \
     python3 \
+    python3-pip \
+    python3-venv \
     iproute2 \
     dumb-init \
     libvips-dev \
@@ -25,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     jq \
     cron \
     gosu \
+    $OPENCLAW_DOCKER_APT_PACKAGES \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 22
@@ -32,8 +38,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user 'openclaw'
-RUN groupadd -r openclaw && useradd -r -g openclaw -m -s /bin/bash openclaw
+# Create openclaw user and group
+# We use a fixed GID for docker group to match host if possible, but for now we rely on socket permissions
+RUN groupadd -r openclaw && useradd -r -g openclaw -m -s /bin/bash -G audio,video openclaw \
+    && mkdir -p /home/openclaw/.openclaw \
+    && chown -R openclaw:openclaw /home/openclaw
+
+# Allow openclaw user to access docker socket (dynamically adjust group if needed in entrypoint)
+# This is crucial for Sandboxing to work
+RUN groupadd -g 999 docker || groupadd docker || true && usermod -aG docker openclaw
 
 # Install OpenClaw and PM2 globally
 # PM2 is used for process management and reloading
@@ -44,6 +57,9 @@ RUN npm install -g playwright
 
 # Install Playwright system dependencies (requires root)
 RUN npx playwright install-deps
+
+# Copy default configuration
+COPY openclaw.defaults.json /etc/openclaw.defaults.json
 
 # Copy scripts and config
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -59,6 +75,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh && \
 RUN mkdir -p /home/openclaw/.openclaw && \
     chown -R openclaw:openclaw /home/openclaw
 
+# Define Python User Base for persistence
+ENV PYTHONUSERBASE=/home/openclaw/.openclaw/python_deps
+ENV PATH=$PYTHONUSERBASE/bin:$PATH
+
 # Switch to non-root user for Playwright installation
 # We temporarily switch to install browsers in user space
 USER openclaw
@@ -70,8 +90,8 @@ RUN npx playwright install
 # Switch back to root because entrypoint needs to start cron
 USER root
 
-# Expose the default gateway port
-EXPOSE 18789
+# Expose the default gateway port and canvas host port
+EXPOSE 18789 18793
 
 # Use dumb-init as the entrypoint handler
 ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/entrypoint.sh"]
