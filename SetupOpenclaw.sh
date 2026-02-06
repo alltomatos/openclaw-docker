@@ -184,8 +184,6 @@ services:
     volumes:
       # Mapeamento direto para persistência no host
       - /root/openclaw/.openclaw:/home/openclaw/.openclaw
-      # Mapeamento de Skills
-      - ./skills:/home/openclaw/.openclaw/workspace/skills
       # Socket do Docker para Sandboxing
       - /var/run/docker.sock:/var/run/docker.sock
 $middleware_config
@@ -859,6 +857,15 @@ setup_openclaw() {
     
     # Preparar persistência (diretórios no host)
     prepare_persistence
+
+    # Copiar skills iniciais para a persistência (evita montar volume nested/circular)
+    if [ -d "skills" ]; then
+        log_info "Copiando skills iniciais para o workspace..."
+        mkdir -p /root/openclaw/.openclaw/workspace/skills
+        cp -rn skills/* /root/openclaw/.openclaw/workspace/skills/ 2>/dev/null || true
+        # Garante permissões corretas
+        chown -R 1000:1000 /root/openclaw/.openclaw/workspace/skills
+    fi
 
     # Tenta detectar Traefik/Swarm
     TRAEFIK_NET=$(detect_swarm_traefik)

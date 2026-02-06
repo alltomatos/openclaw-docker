@@ -10,8 +10,6 @@ services:
     volumes: &openclaw-volumes
       # Configuração (chaves, sessões, canais) - Mapeado para host (Padrão: ./data/config ou /root/openclaw/config)
       - ${OPENCLAW_CONFIG_PATH:-./data/config}:/home/openclaw/.openclaw
-      # Mapeamento local de skills para instalação segura
-      - ./skills:/home/openclaw/.openclaw/workspace/skills
       # Socket do Docker para Sandboxing (opcional, mas recomendado para isolamento)
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
