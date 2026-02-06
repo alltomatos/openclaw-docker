@@ -51,6 +51,11 @@ log_error() {
     log "ERROR: $1"
 }
 
+log_warning() {
+    echo -e "${AMARELO}[AVISO] $1${RESET}" >&2
+    log "WARNING: $1"
+}
+
 # --- Verificações ---
 
 check_root() {
@@ -665,7 +670,28 @@ install_full_stack_swarm() {
     # 2. Iniciar Swarm se necessário
     if [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" != "active" ]; then
         log_info "Iniciando Docker Swarm..."
-        docker swarm init >/dev/null 2>&1 || log_error "Falha ao iniciar Swarm (talvez precise de --advertise-addr?)"
+        # Tenta init simples primeiro
+        if ! docker swarm init >/dev/null 2>&1; then
+            log_warning "Falha no init automático. Tentando detectar IP principal..."
+            
+            # Tenta detectar IP
+            local ADVERTISE_ADDR=""
+            # Tenta via hostname
+            ADVERTISE_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
+            
+            # Se falhar, tenta via ip route (mais confiável para gateway default)
+            if [ -z "$ADVERTISE_ADDR" ]; then
+                ADVERTISE_ADDR=$(ip route get 1 2>/dev/null | awk '{print $7;exit}')
+            fi
+            
+            if [ -n "$ADVERTISE_ADDR" ]; then
+                log_info "Usando IP detectado: $ADVERTISE_ADDR"
+                docker swarm init --advertise-addr "$ADVERTISE_ADDR" || log_error "Falha crítica ao iniciar Swarm."
+            else
+                log_error "Não foi possível detectar IP. O Swarm não pôde ser iniciado."
+                log_error "Tente rodar manualmente: docker swarm init --advertise-addr <SEU_IP>"
+            fi
+        fi
     fi
     
     # 3. Coletar Informações
