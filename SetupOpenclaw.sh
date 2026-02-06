@@ -144,7 +144,9 @@ generate_swarm_config() {
         - \"traefik.http.routers.openclaw.middlewares=openclaw-auth\""
     fi
 
+    # Configuração COMPLETA para Swarm (evita dependência do docker-compose.yml e erro de 'profiles')
     cat > docker-compose.swarm.yml <<EOF
+version: "3.7"
 services:
   openclaw:
     image: watink/openclaw:latest
@@ -157,20 +159,22 @@ services:
         - "traefik.enable=true"
         - "traefik.http.routers.openclaw.rule=Host(\`$domain\`)"
         - "traefik.http.routers.openclaw.entrypoints=web"
+        - "traefik.http.routers.openclaw.entrypoints=websecure"
+        - "traefik.http.routers.openclaw.tls.certresolver=letsencryptresolver"
         - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
         # Canvas Host (Porta 18793) - Requer subdomínio ou path separado se exposto via Traefik
-        # Por simplicidade, não estamos expondo o Canvas via Traefik por padrão no Swarm
-        # pois requer configuração de WebSocket específica.
     environment:
       - OPENCLAW_DISABLE_BONJOUR=1
-$middleware_config
-        # Opcional: Se usar HTTPS/TLS
-        # - "traefik.http.routers.openclaw.entrypoints=websecure"
-        # - "traefik.http.routers.openclaw.tls=true"
+      # Token de Gateway para automação (opcional, pode ser injetado via secret futuramente)
+      - OPENCLAW_GATEWAY_TOKEN=\${OPENCLAW_GATEWAY_TOKEN:-}
     volumes:
+      # Mapeamento direto para persistência no host
       - /root/openclaw/.openclaw:/home/openclaw/.openclaw
-      # - /root/openclaw/home:/home/openclaw
+      # Mapeamento de Skills
       - ./skills:/home/openclaw/.openclaw/workspace/skills
+      # Socket do Docker para Sandboxing
+      - /var/run/docker.sock:/var/run/docker.sock
+$middleware_config
 
 networks:
   $network_name:
@@ -592,21 +596,21 @@ EOF
     
     # 7. Criar Admin Portainer
     log_info "Configurando usuário admin do Portainer..."
-    local MAX_RETRIES=5
+    local MAX_RETRIES=20
     local CONTA_CRIADA=false
     
     for i in $(seq 1 $MAX_RETRIES); do
         RESPONSE=$(curl -k -s -X POST "https://$PORTAINER_DOMAIN/api/users/admin/init" \
             -H "Content-Type: application/json" \
             -d "{\"Username\": \"$PORTAINER_USER\", \"Password\": \"$PORTAINER_PASS\"}")
-            
+        
         if echo "$RESPONSE" | grep -q "\"Username\":\"$PORTAINER_USER\""; then
             log_success "Admin Portainer criado com sucesso!"
             CONTA_CRIADA=true
             break
         else
-            log_info "Tentativa $i/$MAX_RETRIES de criar admin falhou. Retentando..."
-            sleep 5
+            log_info "Tentativa $i/$MAX_RETRIES de criar admin falhou. Retentando em 10s..."
+            sleep 10
         fi
     done
     
@@ -743,10 +747,15 @@ setup_openclaw() {
             generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH"
             
             log_info "Baixando imagem oficial..."
-            docker pull watink/openclaw:latest
+            if ! docker pull watink/openclaw:latest; then
+                log_error "Falha ao baixar imagem watink/openclaw:latest."
+                echo -e "${AMARELO}Tentando construir localmente como fallback...${RESET}"
+                build_image
+            fi
             
             log_info "Realizando deploy da Stack..."
-            docker stack deploy -c docker-compose.yml -c docker-compose.swarm.yml openclaw
+            # Usa APENAS o arquivo Swarm gerado (que agora é completo), evitando conflitos com 'profiles' do docker-compose.yml
+            docker stack deploy -c docker-compose.swarm.yml openclaw
             
             if [ $? -eq 0 ]; then
                 log_success "OpenClaw implantado no Swarm!"
@@ -1239,6 +1248,11 @@ menu() {
             11)
                 check_root
                 cleanup_vps
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            12)
+                check_root
+                uninstall_docker
                 read -p "Pressione ENTER para continuar..."
                 ;;
             0)

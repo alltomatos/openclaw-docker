@@ -227,7 +227,7 @@ Caso precise configurar manualmente (ex: rotação de chaves), edite o `openclaw
 ```
 
 **Troubleshooting:**
-Se o bot não responder imediatamente após a conexão, reinicie o gateway para carregar a nova sessão. Use a **Opção 8** do menu ou execute:
+Se o bot não responder imediatamente após a conexão, reinicie o gateway para carregar a nova sessão. Use a **Opção 10** do menu ou execute:
 ```bash
 openclaw gateway restart
 ```
@@ -242,11 +242,11 @@ Se você vir a mensagem **"Disconnected (1008): Pairing Required"** ou similar:
 
 **Opção A: Via Menu (Recomendado)**
 1. Rode `./SetupOpenclaw.sh` no servidor.
-2. Escolha a **Opção 11 - Aprovar Dispositivo**.
+2. Escolha a **Opção 6 - Gerenciar Dispositivos**.
 3. Selecione o ID correspondente ao seu navegador na lista.
 
 **Opção B: Via Terminal Manual**
-1.  Acesse o terminal da VPS (ou use a **Opção 4** do menu).
+1.  Acesse o terminal da VPS (ou use a **Opção 9** do menu).
 2.  Liste os pedidos pendentes:
     ```bash
     openclaw devices list
