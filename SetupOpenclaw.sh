@@ -215,6 +215,13 @@ setup_security_config() {
     # Se falhar (arquivo não existe), cria um JSON vazio
     docker cp "$container_id":/home/openclaw/.openclaw/openclaw.json ./current_config.json 2>/dev/null || echo "{}" > ./current_config.json
 
+    # Fix self-healing: Remove invalid key 'gateway.auth.type' if present (bug fix)
+    if jq -e '.gateway.auth.type' ./current_config.json >/dev/null 2>&1; then
+        log_info "Corrigindo configuração antiga (removendo gateway.auth.type inválido)..."
+        jq 'del(.gateway.auth.type)' ./current_config.json > ./fixed_config.json && mv ./fixed_config.json ./current_config.json
+        # Force re-apply of correct settings if needed, or just let it continue
+    fi
+
     # Verificar se já tem gateway.auth.token configurado
     local HAS_TOKEN=$(jq -r '.gateway.auth.token // empty' ./current_config.json 2>/dev/null)
     
@@ -237,7 +244,6 @@ setup_security_config() {
     # Merge/Criação com jq
     # Adiciona auth token e trusted proxies (essencial para evitar erros de loopback_no_auth)
     jq --arg token "$NEW_TOKEN" '
-        .gateway.auth.type = "token" |
         .gateway.auth.token = $token |
         .gateway.trustedProxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1"]
     ' ./current_config.json > ./new_config.json

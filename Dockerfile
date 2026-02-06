@@ -46,7 +46,10 @@ RUN groupadd -r openclaw && useradd -r -g openclaw -m -s /bin/bash -G audio,vide
 
 # Allow openclaw user to access docker socket (dynamically adjust group if needed in entrypoint)
 # This is crucial for Sandboxing to work
-RUN groupadd -g 999 docker || groupadd docker || true && usermod -aG docker openclaw
+RUN if ! getent group docker > /dev/null; then \
+      groupadd -g 999 docker || groupadd docker; \
+    fi && \
+    usermod -aG docker openclaw
 
 # Install OpenClaw and PM2 globally
 # PM2 is used for process management and reloading
