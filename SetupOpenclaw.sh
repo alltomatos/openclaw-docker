@@ -498,7 +498,7 @@ install_full_stack_swarm() {
 version: "3.7"
 services:
   traefik:
-    image: traefik:v3.4.0
+    image: ghcr.io/traefik/traefik:v3.4.0
     command:
       - "--api.dashboard=true"
       - "--providers.swarm=true"
@@ -515,6 +515,8 @@ services:
       - "--certificatesresolvers.letsencryptresolver.acme.storage=/etc/traefik/letsencrypt/acme.json"
       - "--certificatesresolvers.letsencryptresolver.acme.email=$EMAIL_SSL"
       - "--log.level=DEBUG"
+      - "--log.format=common"
+      - "--accesslog=true"
     volumes:
       - vol_certificates:/etc/traefik/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -553,7 +555,7 @@ networks:
 EOF
 
     log_info "Implantando Traefik..."
-    docker stack deploy -c traefik.yaml traefik
+    docker stack deploy --prune --resolve-image always -c traefik.yaml traefik
     wait_stack "traefik"
     
     # 6. Deploy Portainer
@@ -608,7 +610,7 @@ networks:
 EOF
 
     log_info "Implantando Portainer..."
-    docker stack deploy -c portainer.yaml portainer
+    docker stack deploy --prune --resolve-image always -c portainer.yaml portainer
     
     log_info "Aguardando Portainer inicializar completamente..."
     wait_stack "portainer"
