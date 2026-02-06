@@ -1470,13 +1470,6 @@ run_status() {
          log_error "Container não encontrado."
     fi
 }
-         echo ""
-         echo -e "${AZUL}>>> Health:${RESET}"
-         docker exec -it "$container_id" openclaw health
-    else
-         log_error "Container não encontrado."
-    fi
-}
 
 # --- Menu Principal ---
 
