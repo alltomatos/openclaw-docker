@@ -48,7 +48,11 @@ O menu interativo facilita o gerenciamento do ambiente:
 2.  **Apenas Instalar Docker**: Prepara o servidor se ele estiver "zerado".
 3.  **Ver Logs**: Atalho para visualizar o que está acontecendo.
 4.  **Acessar Terminal**: Entra no container para manutenção avançada.
-5.  **Limpar VPS**: Remove tudo (útil para testes ou reset).
+5.  **Gerenciar Skills**: Menu dedicado para adicionar e escanear plugins/skills.
+6.  **Rodar Setup Wizard**: Executa o assistente oficial de configuração (Onboarding).
+7.  **Gerar QR Code WhatsApp**: Atalho rápido para conectar seu WhatsApp.
+8.  **Reiniciar Gateway**: Reinicia o serviço de gateway (útil após conectar canais).
+9.  **Limpar VPS**: Remove completamente o OpenClaw (cuidado!).
 
 Siga as instruções do menu interativo. O script detectará automaticamente se é necessário instalar a infraestrutura e guiará você passo-a-passo. Você poderá escolher entre o modo **Cluster (Swarm + Traefik)** ou **Standalone (Docker Puro)**.
 
@@ -80,23 +84,19 @@ docker compose up -d
 Se for a primeira vez, você precisará configurar suas chaves de API (LLM) e canais.
 O sistema já inicia com uma **política de segurança padrão** (Sandboxing: All, Tool Policy: Safe).
 
-Você pode configurar suas chaves de duas formas:
+Você pode configurar suas chaves de três formas:
 
-**Opção A: Via CLI dedicado (Recomendado)**
+**Opção A: Via Setup Wizard (Recomendado)**
+Selecione a **opção 6** no menu do `SetupOpenclaw.sh`. Isso iniciará o assistente interativo oficial dentro do container.
+
+**Opção B: Via CLI dedicado**
 ```bash
 # Para configuração inicial ou ajustes (mantém defaults seguros)
 docker compose run --rm openclaw-cli configure
 ```
 
-**Nota:** O comando `onboard` é destinado a instalações limpas. Como o container já inicia com uma configuração segura (`openclaw.json` gerado a partir de defaults), use `configure` para ajustar chaves de API e canais sem perder as políticas de segurança.
-
-**Opção B: Via Terminal do Gateway**
-```bash
-docker compose exec openclaw-gateway openclaw onboard
-```
-
-**Opção C: Via Terminal Interativo (Menu)**
-Selecione a **opção 4** no menu do `SetupOpenclaw.sh`.
+**Opção C: Via Terminal Manual**
+Selecione a **opção 4** no menu para acessar o terminal e rode `openclaw configure`.
 
 ### 🛡️ Política de Segurança e Sandboxing
 Por padrão, este instalador configura o OpenClaw em modo **Secure by Default**:
@@ -120,15 +120,16 @@ Com isso, qualquer cliente que apresentar este token no handshake WebSocket ser�
 Além do WhatsApp, o OpenClaw suporta diversos outros canais como Telegram, Discord, Slack, etc.
 
 #### 1. Conectar WhatsApp (QR Code)
-Para conectar o WhatsApp, você precisa gerar o QR Code diretamente no terminal do container.
-
-1.  Acesse o terminal do container (Menu opção 4 ou `docker compose exec ...`).
-2.  Execute o comando:
-    ```bash
-    openclaw channels login --channel whatsapp
-    ```
-    *Dica: Use `openclaw channels login --channel whatsapp --account trabalho` para configurar múltiplas contas.*
+A forma mais fácil é usar o menu do instalador:
+1.  Execute `./SetupOpenclaw.sh`
+2.  Escolha a **Opção 7 - Gerar QR Code WhatsApp**.
 3.  📱 **Ação:** Tenha seu celular pronto em **Aparelhos Conectados > Conectar um aparelho**, pois o código expira rápido.
+
+Alternativamente, via terminal:
+```bash
+openclaw channels login --channel whatsapp
+```
+*Dica: Use `openclaw channels login --channel whatsapp --account trabalho` para configurar múltiplas contas.*
 
 #### 2. Conectar Telegram
 Para o Telegram, você precisa de um Bot Token (fale com o @BotFather).
@@ -207,7 +208,7 @@ Caso precise configurar manualmente (ex: rotação de chaves), edite o `openclaw
 ```
 
 **Troubleshooting:**
-Se o bot não responder imediatamente após a conexão, reinicie o gateway para carregar a nova sessão:
+Se o bot não responder imediatamente após a conexão, reinicie o gateway para carregar a nova sessão. Use a **Opção 8** do menu ou execute:
 ```bash
 openclaw gateway restart
 ```
@@ -236,7 +237,7 @@ O sistema de **Auto-Reload** detecta e instala dependências automaticamente par
 
 2.  **Ativação**:
     *   **Opção A (Automática)**: O sistema roda um scan diário às **03:00 AM**. Além disso, o **script de instalação executa uma varredura inicial** logo após o deploy.
-    *   **Opção B (Manual/Imediata)**: Force a detecção e instalação agora mesmo sem reiniciar o container:
+    *   **Opção B (Manual/Imediata)**: Force a detecção e instalação agora mesmo sem reiniciar o container. Use a **Opção 5** do menu ou execute:
         ```bash
         docker compose exec openclaw /usr/local/bin/scan_skills.sh
         ```
