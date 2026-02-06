@@ -994,6 +994,7 @@ setup_openclaw() {
                     echo " URL: http://$DOMAIN" >> /root/dados_vps/openclaw.txt
                     echo " USER: $AUTH_USER" >> /root/dados_vps/openclaw.txt
                     echo " PASS: $AUTH_PASS" >> /root/dados_vps/openclaw.txt
+                    echo " NETWORK: $TRAEFIK_NET" >> /root/dados_vps/openclaw.txt
                     chmod 600 /root/dados_vps/openclaw.txt
                 else
                     log_error "Não foi possível gerar o hash (requer internet para baixar httpd:alpine ou python3 local)."
@@ -1010,6 +1011,12 @@ setup_openclaw() {
             fi
             
             # Não salvamos o GEN_TOKEN como token final pois o Wizard irá sobrescrever
+            
+            # Garantir que a rede esteja salva (caso não tenha entrado no bloco de auth)
+            if ! grep -q "NETWORK:" /root/dados_vps/openclaw.txt 2>/dev/null; then
+                echo " NETWORK: $TRAEFIK_NET" >> /root/dados_vps/openclaw.txt
+            fi
+            
             chmod 600 /root/dados_vps/openclaw.txt
 
             # Passamos token vazio para iniciar sem configuração e permitir onboard
@@ -1334,6 +1341,13 @@ run_wizard() {
              
              # Recuperar Rede Traefik
              local network_name=$(detect_swarm_traefik)
+             
+             # Se detecção falhar, tenta ler do arquivo salvo na instalação
+             if [ -z "$network_name" ] && [ -f "/root/dados_vps/openclaw.txt" ]; then
+                 network_name=$(grep "NETWORK: " /root/dados_vps/openclaw.txt | awk '{print $2}')
+             fi
+             
+             # Último recurso (fallback padrão)
              [ -z "$network_name" ] && network_name="public_net"
              
              # Recuperar/Gerar Auth Hash
