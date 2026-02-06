@@ -20,7 +20,7 @@ Este repositório contém a configuração completa para rodar o **OpenClaw** em
 
 ### Pré-requisitos
 - Docker & Docker Compose instalados.
-- Linux/WSL2 (Recomendado).
+- Ambiente Linux (Ubuntu/Debian recomendado).
 
 ### ☁️ Instalação em VPS (Produção)
 
