@@ -590,9 +590,9 @@ EOF
     log_info "Implantando Portainer..."
     docker stack deploy -c portainer.yaml portainer
     
-    log_info "Aguardando Portainer iniciar para criar admin..."
+    log_info "Aguardando Portainer inicializar completamente (30s)..."
     wait_stack "portainer"
-    sleep 10 # Margem de segurança extra
+    sleep 30 # Tempo para o Portainer subir o DB interno e Traefik rotear
     
     # 7. Criar Admin Portainer
     log_info "Configurando usuário admin do Portainer..."
@@ -600,24 +600,49 @@ EOF
     local CONTA_CRIADA=false
     
     for i in $(seq 1 $MAX_RETRIES); do
-        RESPONSE=$(curl -k -s -X POST "https://$PORTAINER_DOMAIN/api/users/admin/init" \
+        # Tenta criar o usuário admin
+        # Usa --resolve para garantir que batemos no Traefik localmente, sem depender de DNS externo
+        # Redireciona stderr para stdout para capturar erros de conexão verbose se necessário, mas -s silencia o progresso
+        RESPONSE=$(curl -k -s --resolve "$PORTAINER_DOMAIN:443:127.0.0.1" -X POST "https://$PORTAINER_DOMAIN/api/users/admin/init" \
             -H "Content-Type: application/json" \
             -d "{\"Username\": \"$PORTAINER_USER\", \"Password\": \"$PORTAINER_PASS\"}")
         
+        # Verifica sucesso (JSON com Username)
         if echo "$RESPONSE" | grep -q "\"Username\":\"$PORTAINER_USER\""; then
             log_success "Admin Portainer criado com sucesso!"
             CONTA_CRIADA=true
             break
+        elif echo "$RESPONSE" | grep -q "Users already exists"; then
+             # Nota: Portainer retorna "Users already exists" ou erro similar code 409
+            log_info "Usuário admin já existe no Portainer."
+            CONTA_CRIADA=true
+            break
         else
-            log_info "Tentativa $i/$MAX_RETRIES de criar admin falhou. Retentando em 10s..."
-            sleep 10
+            log_info "Tentativa $i/$MAX_RETRIES falhou. Retentando em 15s..."
+            # Tenta extrair mensagem de erro do JSON se houver
+            local ERR_MSG=$(echo "$RESPONSE" | grep -o '"err": *"[^"]*"' | cut -d'"' -f4)
+            if [ -n "$ERR_MSG" ]; then
+                log_info "Erro API: $ERR_MSG"
+                if [[ "$ERR_MSG" == *"User already exists"* ]]; then
+                     log_info "Usuário detectado via mensagem de erro."
+                     CONTA_CRIADA=true
+                     break
+                fi
+            fi
+            sleep 15
         fi
     done
+
+    if [ "$CONTA_CRIADA" = false ]; then
+        log_error "Não foi possível configurar o admin do Portainer automaticamente."
+        echo -e "${AMARELO}Por favor, acesse https://$PORTAINER_DOMAIN e crie a conta manualmente assim que possível.${RESET}"
+    fi
     
     local TOKEN=""
     if [ "$CONTA_CRIADA" = true ]; then
         # Gerar Token JWT
-        TOKEN=$(curl -k -s -X POST "https://$PORTAINER_DOMAIN/api/auth" \
+        log_info "Gerando token de acesso..."
+        TOKEN=$(curl -k -s --resolve "$PORTAINER_DOMAIN:443:127.0.0.1" -X POST "https://$PORTAINER_DOMAIN/api/auth" \
             -H "Content-Type: application/json" \
             -d "{\"username\":\"$PORTAINER_USER\",\"password\":\"$PORTAINER_PASS\"}" | jq -r .jwt)
             
@@ -631,9 +656,7 @@ Pass: $PORTAINER_PASS
 Token: $TOKEN
 EOF
         chmod 600 /root/dados_vps/dados_portainer.txt
-    else
-        log_error "Não foi possível criar o admin do Portainer automaticamente."
-        echo "Crie manualmente acessando: https://$PORTAINER_DOMAIN"
+        log_success "Dados de acesso salvos em /root/dados_vps/dados_portainer.txt"
     fi
     
     # 8. Deploy OpenClaw
