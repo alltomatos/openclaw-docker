@@ -15,9 +15,13 @@ services:
     environment:
       # Desabilita mDNS (Bonjour) para evitar anúncios na rede (OpSec/Produção)
       - OPENCLAW_DISABLE_BONJOUR=1
+      # Bind LAN (necessário para Traefik alcançar o container)
+      - OPENCLAW_GATEWAY_BIND=lan
       # Token de Autenticação Estático (Opcional - para automação/headless)
       # Se definido, o Gateway exigirá este token para conexão.
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
+    # Permite iniciar sem config para rodar o onboard depois
+    command: ["openclaw", "gateway", "--allow-unconfigured"]
 
   # Serviço auxiliar para rodar comandos CLI (onboard, install, etc)
   # Uso: docker compose run --rm openclaw-cli onboard

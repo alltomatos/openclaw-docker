@@ -204,6 +204,8 @@ services:
       - OPENCLAW_GATEWAY_BIND=lan
       # Token de Gateway para automação
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-$gateway_token}
+    # Permite iniciar sem config para rodar o onboard depois
+    command: ["openclaw", "gateway", "--allow-unconfigured"]
     volumes:
       # Mapeamento direto para persistência no host
       - /root/openclaw/.openclaw:/home/openclaw/.openclaw
@@ -1475,6 +1477,13 @@ run_status() {
     if [ -n "$container_id" ]; then
          echo -e "${AZUL}>>> Status:${RESET}"
          docker exec -it "$container_id" openclaw status
+         echo ""
+         echo -e "${AZUL}>>> Health:${RESET}"
+         docker exec -it "$container_id" openclaw health
+    else
+         log_error "Container não encontrado."
+    fi
+}
          echo ""
          echo -e "${AZUL}>>> Health:${RESET}"
          docker exec -it "$container_id" openclaw health
