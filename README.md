@@ -213,6 +213,33 @@ Se o bot não responder imediatamente após a conexão, reinicie o gateway para 
 openclaw gateway restart
 ```
 
+### 📱 Acesso ao Dashboard (Control UI) e Segurança
+
+O Dashboard (Control UI) é acessível via navegador na porta `18789`.
+
+**1. Pairing (Aprovação de Dispositivo)**
+Por segurança, o OpenClaw exige que novos dispositivos (navegadores) sejam aprovados manualmente se não estiverem rodando na mesma máquina (localhost).
+Se você vir a mensagem **"Disconnected (1008): Pairing Required"** ou similar:
+
+1.  Acesse o terminal da VPS (ou use a **Opção 4** do menu).
+2.  Liste os pedidos pendentes:
+    ```bash
+    openclaw devices list
+    ```
+3.  Aprove o ID do seu navegador:
+    ```bash
+    openclaw devices approve <ID_DO_DEVICE>
+    ```
+
+**2. Limitações HTTP (WebCrypto)**
+Se você acessar via IP direto (ex: `http://1.2.3.4:18789`), algumas funcionalidades do navegador (WebCrypto) podem ser bloqueadas por falta de HTTPS/SSL.
+*   **Recomendado:** Usar Swarm + Traefik (configurado automaticamente pelo setup) para ter HTTPS.
+*   **Alternativa:** Fazer um Túnel SSH para acessar como localhost:
+    ```bash
+    ssh -L 18789:127.0.0.1:18789 root@seu-ip-vps
+    ```
+    E acessar em seu computador: `http://localhost:18789`.
+
 ---
 
 ## 🧠 Gerenciamento de Skills

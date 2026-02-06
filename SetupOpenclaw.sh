@@ -286,6 +286,12 @@ setup_security_config() {
     echo "----------------------------------------------------------------" >> /root/dados_vps/openclaw.txt
     echo " LINK DIRETO DO DASHBOARD:" >> /root/dados_vps/openclaw.txt
     echo " http://$PUBLIC_IP:18789/?token=$NEW_TOKEN" >> /root/dados_vps/openclaw.txt
+    echo "----------------------------------------------------------------" >> /root/dados_vps/openclaw.txt
+    echo " NOTA IMPORTANTE (PRIMEIRO ACESSO):" >> /root/dados_vps/openclaw.txt
+    echo " Ao acessar por IP externo, o sistema pode pedir aprovação (Pairing)." >> /root/dados_vps/openclaw.txt
+    echo " Se vir 'Pairing Required', rode no terminal:" >> /root/dados_vps/openclaw.txt
+    echo "   openclaw devices list      (para ver o ID)" >> /root/dados_vps/openclaw.txt
+    echo "   openclaw devices approve <ID> (para liberar)" >> /root/dados_vps/openclaw.txt
     echo "================================================================" >> /root/dados_vps/openclaw.txt
     chmod 600 /root/dados_vps/openclaw.txt
 
