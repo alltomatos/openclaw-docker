@@ -944,14 +944,13 @@ setup_openclaw() {
             [ -z "$DOMAIN" ] && DOMAIN="openclaw.app.localhost"
             
             # --- Autenticação ---
-            # Gerar Token Automático para injeção na Stack
-            log_info "Gerando token de acesso seguro..."
+            # Token não será gerado aqui, deixaremos o Wizard (onboard) criar.
             local GEN_TOKEN=""
-            if command -v openssl &> /dev/null; then
-                GEN_TOKEN=$(openssl rand -hex 16)
-            else
-                GEN_TOKEN=$(date +%s%N | sha256sum | base64 | head -c 32)
-            fi
+            # if command -v openssl &> /dev/null; then
+            #    GEN_TOKEN=$(openssl rand -hex 16)
+            # else
+            #    GEN_TOKEN=$(date +%s%N | sha256sum | base64 | head -c 32)
+            # fi
 
             local AUTH_HASH=""
             echo ""
@@ -1013,7 +1012,8 @@ setup_openclaw() {
             # Não salvamos o GEN_TOKEN como token final pois o Wizard irá sobrescrever
             chmod 600 /root/dados_vps/openclaw.txt
 
-            generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH" "$GEN_TOKEN"
+            # Passamos token vazio para iniciar sem configuração e permitir onboard
+            generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH" ""
             
             log_info "Baixando imagem oficial..."
             if ! docker pull watink/openclaw:latest; then
@@ -1049,17 +1049,19 @@ setup_openclaw() {
     # Modo Standalone (Padrão)
     log_info "Baixando imagem oficial e iniciando containers (Standalone)..."
     
-    # Gerar Token temporário para boot inicial
-    if [ -z "$GEN_TOKEN" ]; then
-        if command -v openssl &> /dev/null; then
-            GEN_TOKEN=$(openssl rand -hex 16)
-        else
-            GEN_TOKEN=$(date +%s%N | sha256sum | base64 | head -c 32)
-        fi
-    fi
+    # Não geramos token temporário, deixamos o Wizard criar.
+    GEN_TOKEN=""
+    # if [ -z "$GEN_TOKEN" ]; then
+    #    if command -v openssl &> /dev/null; then
+    #        GEN_TOKEN=$(openssl rand -hex 16)
+    #    else
+    #        GEN_TOKEN=$(date +%s%N | sha256sum | base64 | head -c 32)
+    #    fi
+    # fi
 
     # Define variáveis para o docker-compose.yml usar paths do host
-    export OPENCLAW_GATEWAY_TOKEN="$GEN_TOKEN"
+    # export OPENCLAW_GATEWAY_TOKEN="$GEN_TOKEN"
+    unset OPENCLAW_GATEWAY_TOKEN
     export OPENCLAW_CONFIG_PATH="/root/openclaw/.openclaw"
     
     docker compose pull
@@ -1556,6 +1558,16 @@ run_status() {
     fi
 }
 
+run_dashboard() {
+    log_info "Iniciando Dashboard..."
+    local container_id=$(docker ps --filter "name=openclaw" --format "{{.ID}}" | head -n 1)
+    if [ -n "$container_id" ]; then
+         docker exec -it "$container_id" openclaw dashboard
+    else
+         log_error "Container não encontrado."
+    fi
+}
+
 # --- Menu Principal ---
 
 menu() {
@@ -1575,6 +1587,7 @@ menu() {
         echo -e "${VERDE}7${BRANCO} - Gerar QR Code WhatsApp${RESET}"
         echo -e "${VERDE}8${BRANCO} - Verificar Saúde do Sistema (Doctor)${RESET}"
         echo -e "${VERDE}9${BRANCO} - Verificar Status do Gateway${RESET}"
+        echo -e "${VERDE}16${BRANCO} - Abrir Dashboard CLI${RESET}"
         echo ""
         echo -e "${AZUL}--- Utilitários ---${RESET}"
         echo -e "${VERDE}10${BRANCO} - Ver Logs do OpenClaw${RESET}"
@@ -1679,6 +1692,10 @@ menu() {
                 check_root
                 echo -e "${AZUL}Sincronizando e exibindo informações de conexão...${RESET}"
                 setup_security_config "" ""
+                read -p "Pressione ENTER para continuar..."
+                ;;
+            16)
+                run_dashboard
                 read -p "Pressione ENTER para continuar..."
                 ;;
             13)
