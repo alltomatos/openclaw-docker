@@ -1,0 +1,33 @@
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    python3 \
+    python3-pip \
+    build-essential \
+    file \
+    procps \
+    zip \
+    unzip \
+    wget \
+    jq \
+    nano \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 22 LTS (Nodesource) - Ensures version 22+
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -g 1000 sandbox && useradd -u 1000 -g sandbox -m -s /bin/bash sandbox && \
+    mkdir -p /home/linuxbrew/.linuxbrew && \
+    chown -R sandbox:sandbox /home/linuxbrew/.linuxbrew
+USER sandbox
+WORKDIR /home/sandbox
+ENV NONINTERACTIVE=1
+RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+
+# Verify installations
+RUN brew --version && node -v && npm -v

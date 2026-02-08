@@ -32,17 +32,36 @@ RUN apt-get update && apt-get install -y \
     gosu \
     procps \
     file \
+    zip \
+    unzip \
+    wget \
+    iputils-ping \
+    dnsutils \
+    net-tools \
     $OPENCLAW_DOCKER_APT_PACKAGES \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 22
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
+    && npm install -g pnpm \
     && rm -rf /var/lib/apt/lists/*
 
 # Create openclaw user and group
 # We use a fixed GID for docker group to match host if possible, but for now we rely on socket permissions
-RUN groupadd -r openclaw && useradd -r -g openclaw -m -s /bin/bash -G audio,video openclaw \
+# FIX: Use fixed UID/GID 1000 to match SetupOpenclaw.sh chown operations
+# Note: ubuntu:24.04 usually has user ubuntu at 1000. We need to handle this.
+RUN if getent group 1000; then \
+        groupmod -n openclaw $(getent group 1000 | cut -d: -f1); \
+    else \
+        groupadd -g 1000 openclaw; \
+    fi \
+    && if id 1000 >/dev/null 2>&1; then \
+        usermod -l openclaw -g 1000 -m -d /home/openclaw -s /bin/bash $(id -un 1000); \
+    else \
+        useradd -u 1000 -g openclaw -m -s /bin/bash -G audio,video openclaw; \
+    fi \
+    && usermod -aG audio,video openclaw \
     && mkdir -p /home/openclaw/.openclaw \
     && chown -R openclaw:openclaw /home/openclaw \
     && mkdir -p /home/linuxbrew/.linuxbrew \
