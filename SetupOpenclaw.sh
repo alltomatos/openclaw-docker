@@ -43,7 +43,7 @@ header() {
     echo -e "${AZUL}##                                         SETUP OPENCLAW                                      ##${RESET}"
     echo -e "${AZUL}## // ## // ## // ## // ## // ## // ## // ## //## // ## // ## // ## // ## // ## // ## // ## // ##${RESET}"
     echo ""
-    echo -e "                           ${BRANCO}Versão do Instalador: ${VERDE}v2.9.0${RESET}                "
+    echo -e "                           ${BRANCO}Versão do Instalador: ${VERDE}v2.9.6${RESET}                "
     echo -e "${VERDE}     ${BRANCO}<- Desenvolvido por AllTomatos ->     ${VERDE}github.com/alltomatos/openclaw-docker${RESET}"
     echo -e "         ${AZUL}Agradecimento Especial ao Orion pelo trabalho no Setup Orion${RESET}"
     echo -e "                   ${BRANCO}Visite: ${VERDE}https://mundoautomatik.com${RESET}"
@@ -401,13 +401,13 @@ services:
         - "traefik.http.routers.openclaw.entrypoints=websecure"
         - "traefik.http.routers.openclaw.tls.certresolver=letsencryptresolver"
         - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
-        # Canvas Host (Porta 18793)
+        # Canvas Host (Porta 8080)
         - "traefik.http.routers.openclaw-canvas.rule=Host(\`$canvas_domain\`)"
         - "traefik.http.routers.openclaw-canvas.service=openclaw-canvas"
         - "traefik.http.routers.openclaw-canvas.entrypoints=web"
         - "traefik.http.routers.openclaw-canvas.entrypoints=websecure"
         - "traefik.http.routers.openclaw-canvas.tls.certresolver=letsencryptresolver"
-        - "traefik.http.services.openclaw-canvas.loadbalancer.server.port=18793"
+        - "traefik.http.services.openclaw-canvas.loadbalancer.server.port=8080"
 $middleware_config
     volumes:
       - /root/openclaw:/home/openclaw/.openclaw
@@ -475,7 +475,47 @@ EOF
         log_warning "Atenção: Não foi possível confirmar o Patch de API Docker."
     fi
     
-    sleep 5
+    # Configuração de Default Address Pools para evitar conflitos de IP
+    log_info "Configurando pools de endereços padrão do Docker (daemon.json)..."
+    
+    local DAEMON_JSON="/etc/docker/daemon.json"
+    local NEEDS_RESTART=false
+
+    # Se o arquivo não existir, cria com o conteúdo básico
+    if [ ! -f "$DAEMON_JSON" ]; then
+        log_info "Criando $DAEMON_JSON..."
+        cat > "$DAEMON_JSON" <<EOF
+{
+  "default-address-pools": [
+    {
+      "base": "10.10.0.0/16",
+      "size": 24
+    },
+    {
+      "base": "10.20.0.0/16",
+      "size": 24
+    }
+  ]
+}
+EOF
+        NEEDS_RESTART=true
+    else
+        # Se existir, verifica se já tem a config. Se não tiver, avisa (não sobrescreve para evitar quebrar configs existentes complexas)
+        if ! grep -q "default-address-pools" "$DAEMON_JSON"; then
+            log_warn "O arquivo $DAEMON_JSON já existe mas não contém default-address-pools."
+            log_warn "Recomendado adicionar manualmente para evitar conflitos: 10.10.0.0/16 e 10.20.0.0/16"
+        else
+            log_info "Configuração de address pools já detectada."
+        fi
+    fi
+
+    if [ "$NEEDS_RESTART" = true ]; then
+        log_info "Reiniciando Docker para aplicar configurações de rede..."
+        systemctl restart docker >/dev/null 2>&1
+        sleep 5
+    fi
+
+    sleep 2
 }
 
 setup_security_config() {
@@ -1322,7 +1362,9 @@ setup_openclaw() {
         local jq_filter='.gateway.bind = $bind | .gateway.trustedProxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]'
         
         if [ -n "$TRAEFIK_SUBNET" ]; then
-            jq_filter='.gateway.bind = $bind | .gateway.trustedProxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", $subnet]'
+            jq_filter='.gateway.bind = $bind | .gateway.trustedProxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "10.10.0.0/16", "10.20.0.0/16", $subnet]'
+        else
+            jq_filter='.gateway.bind = $bind | .gateway.trustedProxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "10.10.0.0/16", "10.20.0.0/16"]'
         fi
 
         if jq --arg bind "lan" --arg subnet "$TRAEFIK_SUBNET" "$jq_filter" "$json_file" > "$tmp_json"; then
