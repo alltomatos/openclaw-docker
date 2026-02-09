@@ -46,7 +46,7 @@ rm -rf SetupOpenclaw.sh && curl -sSL https://raw.githubusercontent.com/alltomato
 
 ![Setup OpenClaw Menu](./imagem/setup2.9.5.png)
 
-O menu interativo (v2.9.6+) facilita o gerenciamento do ambiente:
+O menu interativo (v2.9.7+) facilita o gerenciamento do ambiente:
 
 **Configuração & Operação**
 1.  **Setup Infraestrutura (Swarm)**: Opção recomendada ("Zero to Hero"). Instala Docker, Swarm, Traefik e Portainer.

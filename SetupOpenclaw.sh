@@ -1324,8 +1324,12 @@ setup_openclaw() {
         fi
     fi
     
-    # Gerar config Swarm (Passamos um token temporário)
-    generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH" "admin-token-123" "$CANVAS_DOMAIN"
+    # Gerar Token Mestre do Gateway (Randomizado)
+    local GATEWAY_TOKEN=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32 ; echo '')
+    log_info "Token de Gateway gerado: $GATEWAY_TOKEN"
+    
+    # Gerar config Swarm (Passamos o token gerado)
+    generate_swarm_config "$TRAEFIK_NET" "$DOMAIN" "$AUTH_HASH" "$GATEWAY_TOKEN" "$CANVAS_DOMAIN"
     
     log_info "Baixando imagem oficial..."
     docker pull watink/openclaw:latest
@@ -1340,40 +1344,42 @@ setup_openclaw() {
     log_info "Iniciando Onboarding Automático (Aguarde)..."
     sleep 5
     
-    local random_token=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 24 ; echo '')
-    
+    # Usa o MESMO token para o onboard
     docker run --rm \
       -v /root/openclaw:/home/openclaw/.openclaw \
       watink/openclaw:latest \
-      openclaw onboard --non-interactive --accept-risk --token "$random_token" >/dev/null 2>&1
+      openclaw onboard --non-interactive --accept-risk --token "$GATEWAY_TOKEN" >/dev/null 2>&1
 
     # Ajuste fino do openclaw.json para Swarm/Traefik (Solicitado pelo usuário)
     local json_file="/root/openclaw/openclaw.json"
     if [ -f "$json_file" ]; then
-        log_info "Atualizando openclaw.json com configurações de DNS e Rede..."
+        log_info "Atualizando openclaw.json com configurações de DNS, Rede e Tokens..."
         
         # Backup preventivo
         cp "$json_file" "${json_file}.bak"
         
         # Atualiza bind para 'lan' e configura trustedProxies para Traefik + Subnet detectada
+        # TAMBÉM força o remote.token e auth.token para garantir sincronia com openclaw.yaml
         local tmp_json=$(mktemp)
         
         # Constrói array de trusted proxies incluindo a subnet do Traefik se existir
-        local jq_filter='.gateway.bind = $bind | .gateway.trustedProxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]'
+        local jq_base_proxies='"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "10.10.0.0/16", "10.20.0.0/16"'
+        local jq_proxies="[$jq_base_proxies]"
         
         if [ -n "$TRAEFIK_SUBNET" ]; then
-            jq_filter='.gateway.bind = $bind | .gateway.trustedProxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "10.10.0.0/16", "10.20.0.0/16", $subnet]'
-        else
-            jq_filter='.gateway.bind = $bind | .gateway.trustedProxies = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "10.10.0.0/16", "10.20.0.0/16"]'
+            jq_proxies="[$jq_base_proxies, \"$TRAEFIK_SUBNET\"]"
         fi
+        
+        # Filtro JQ Unificado: Bind, Proxies, Auth Token, Remote Token
+        local jq_filter=".gateway.bind = \"lan\" | .gateway.trustedProxies = $jq_proxies | .gateway.auth.token = \"$GATEWAY_TOKEN\" | .gateway.remote.token = \"$GATEWAY_TOKEN\""
 
-        if jq --arg bind "lan" --arg subnet "$TRAEFIK_SUBNET" "$jq_filter" "$json_file" > "$tmp_json"; then
+        if jq "$jq_filter" "$json_file" > "$tmp_json"; then
            
            mv "$tmp_json" "$json_file"
            # Garante permissões corretas (994 é o uid do usuário node/openclaw na imagem)
            chown -R 994:994 "/root/openclaw"
            chmod -R 700 "/root/openclaw"
-           log_success "openclaw.json atualizado: Bind=lan, TrustedProxies=Configured"
+           log_success "openclaw.json atualizado: Bind=lan, Proxies=OK, Tokens=Synced"
         else
            log_warn "Falha ao atualizar openclaw.json com jq."
         fi
@@ -1808,36 +1814,56 @@ sync_tokens() {
     local config_file="/root/openclaw/openclaw.json"
     local yaml_file="/root/openclaw.yaml"
     
-    # Tenta extrair token do YAML (Fonte da Verdade no Swarm)
-    local env_token=""
-    if [ -f "$yaml_file" ]; then
-        # Extrai o valor após o =, removendo aspas e espaços
-        env_token=$(grep "OPENCLAW_GATEWAY_TOKEN=" "$yaml_file" | cut -d= -f2 | tr -d ' "')
-    fi
-
-    if [ -f "$config_file" ] && [ -n "$env_token" ]; then
-         local current_auth=$(jq -r '.gateway.auth.token // empty' "$config_file" 2>/dev/null)
-         local current_remote=$(jq -r '.gateway.remote.token // empty' "$config_file" 2>/dev/null)
+    if [ -f "$config_file" ]; then
+         # Source of Truth: gateway.auth.token do JSON (Gerado pelo Onboard)
+         local auth_token=$(jq -r '.gateway.auth.token // empty' "$config_file" 2>/dev/null)
+         local remote_token=$(jq -r '.gateway.remote.token // empty' "$config_file" 2>/dev/null)
          
-         # Se qualquer um dos tokens no JSON for diferente do ENV var, atualiza ambos
-         if [ "$current_auth" != "$env_token" ] || [ "$current_remote" != "$env_token" ]; then
-             log_info "Sincronizando tokens do openclaw.json com o Swarm Config (openclaw.yaml)..."
+         if [ -z "$auth_token" ]; then
+             log_warn "Token de autenticação (auth.token) não encontrado em openclaw.json. Configuração incompleta?"
+             return
+         fi
+
+         local needs_restart=false
+
+         # 1. Sincroniza remote.token se for diferente de auth.token
+         if [ "$auth_token" != "$remote_token" ]; then
+             log_info "Detectado dismatch no JSON. Sincronizando remote.token com auth.token..."
              
              local tmp_conf=$(mktemp)
-             # Atualiza auth.token E remote.token
-             if jq --arg token "$env_token" '.gateway.auth.token = $token | .gateway.remote.token = $token' "$config_file" > "$tmp_conf"; then
+             if jq --arg token "$auth_token" '.gateway.remote.token = $token' "$config_file" > "$tmp_conf"; then
                  mv "$tmp_conf" "$config_file"
-                 
                  # Fix permissions (994:994 is openclaw user in container)
                  chown 994:994 "$config_file"
                  chmod 700 "$config_file"
-                 
-                 log_success "Tokens sincronizados com sucesso."
+                 log_success "openclaw.json atualizado."
+                 needs_restart=true
              else
-                 log_error "Falha ao atualizar tokens no JSON."
                  rm -f "$tmp_conf"
+                 log_error "Falha ao atualizar JSON."
              fi
          fi
+
+         # 2. Sincroniza Swarm Config (openclaw.yaml) se for diferente
+         if [ -f "$yaml_file" ]; then
+             local yaml_token=$(grep "OPENCLAW_GATEWAY_TOKEN=" "$yaml_file" | cut -d= -f2 | tr -d ' "')
+             if [ "$auth_token" != "$yaml_token" ]; then
+                 log_info "Sincronizando token do Swarm (openclaw.yaml) com o JSON..."
+                 
+                 # Atualiza a linha no YAML usando sed (assumindo token seguro para regex simples)
+                 sed -i "s|OPENCLAW_GATEWAY_TOKEN=.*|OPENCLAW_GATEWAY_TOKEN=$auth_token|g" "$yaml_file"
+                 log_success "openclaw.yaml atualizado com o novo token."
+                 needs_restart=true
+             fi
+         fi
+
+         if [ "$needs_restart" = true ]; then
+             restart_gateway
+         else
+             log_info "Todos os tokens (JSON e Swarm) já estão sincronizados. Nenhuma ação necessária."
+         fi
+    else
+        log_error "Arquivo $config_file não encontrado."
     fi
 }
 
@@ -2463,7 +2489,7 @@ menu() {
         echo -e "${VERDE} 2${BRANCO} - Deploy OpenClaw (Aplicação)${RESET}"
         echo -e "${VERDE} 3${BRANCO} - Wizard de Configuração (Onboard)${RESET}"
         echo -e "${VERDE} 4${BRANCO} - Configurar Modo (Local/Remoto)${RESET}"
-        echo -e "${VERDE} 5${BRANCO} - Acessar Terminal / CLI (Menu Avançado)${RESET}"
+        echo -e "${VERDE} 5${BRANCO} - Acessar Terminal / CLI${RESET}"
         
         echo ""
         echo -e "${AZUL}--- Ferramentas & Diagnóstico ---${RESET}"
@@ -2504,35 +2530,10 @@ menu() {
                 read -p "Pressione ENTER para continuar..."
                 ;;
             5)
-                while true; do
-                    header
-                    echo -e "${AZUL}=== Menu Avançado & Dispositivos ===${RESET}"
-                    echo ""
-                    echo -e "${VERDE} 1${BRANCO} - Acessar Terminal do Container (CLI)${RESET}"
-                    echo -e "${VERDE} 2${BRANCO} - Gerenciar Dispositivos (Pareamento)${RESET}"
-                    echo -e "${VERDE} 0${BRANCO} - Voltar${RESET}"
-                    echo ""
-                    echo -en "${AMARELO}Opção: ${RESET}"
-                    read -r SUB_OPT
-                    
-                    case $SUB_OPT in
-                        1)
-                            enter_shell
-                            read -p "Pressione ENTER para continuar..."
-                            ;;
-                        2)
-                            approve_device
-                            read -p "Pressione ENTER para continuar..."
-                            ;;
-                        0)
-                            break
-                            ;;
-                        *)
-                            echo "Opção inválida."
-                            sleep 1
-                            ;;
-                    esac
-                done
+                # Sincroniza tokens antes de entrar e vai direto pro shell
+                sync_tokens
+                enter_shell
+                read -p "Pressione ENTER para continuar..."
                 ;;
             6)
                 tool_view_logs
