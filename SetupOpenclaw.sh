@@ -43,7 +43,7 @@ header() {
     echo -e "${AZUL}##                                         SETUP OPENCLAW                                      ##${RESET}"
     echo -e "${AZUL}## // ## // ## // ## // ## // ## // ## // ## //## // ## // ## // ## // ## // ## // ## // ## // ##${RESET}"
     echo ""
-    echo -e "                           ${BRANCO}Versão do Instalador: ${VERDE}v2.9.6${RESET}                "
+    echo -e "                           ${BRANCO}Versão do Instalador: ${VERDE}v2.9.7${RESET}                "
     echo -e "${VERDE}     ${BRANCO}<- Desenvolvido por AllTomatos ->     ${VERDE}github.com/alltomatos/openclaw-docker${RESET}"
     echo -e "         ${AZUL}Agradecimento Especial ao Orion pelo trabalho no Setup Orion${RESET}"
     echo -e "                   ${BRANCO}Visite: ${VERDE}https://mundoautomatik.com${RESET}"
@@ -1806,26 +1806,35 @@ restart_gateway() {
 
 sync_tokens() {
     local config_file="/root/openclaw/openclaw.json"
-    if [ -f "$config_file" ]; then
-         local auth_token=$(jq -r '.gateway.auth.token // empty' "$config_file" 2>/dev/null)
-         local remote_token=$(jq -r '.gateway.remote.token // empty' "$config_file" 2>/dev/null)
+    local yaml_file="/root/openclaw.yaml"
+    
+    # Tenta extrair token do YAML (Fonte da Verdade no Swarm)
+    local env_token=""
+    if [ -f "$yaml_file" ]; then
+        # Extrai o valor após o =, removendo aspas e espaços
+        env_token=$(grep "OPENCLAW_GATEWAY_TOKEN=" "$yaml_file" | cut -d= -f2 | tr -d ' "')
+    fi
+
+    if [ -f "$config_file" ] && [ -n "$env_token" ]; then
+         local current_auth=$(jq -r '.gateway.auth.token // empty' "$config_file" 2>/dev/null)
+         local current_remote=$(jq -r '.gateway.remote.token // empty' "$config_file" 2>/dev/null)
          
-         if [ -n "$auth_token" ] && [ "$auth_token" != "$remote_token" ]; then
-             log_info "Sincronizando token do Gateway para CLI (Remote Token)..."
+         # Se qualquer um dos tokens no JSON for diferente do ENV var, atualiza ambos
+         if [ "$current_auth" != "$env_token" ] || [ "$current_remote" != "$env_token" ]; then
+             log_info "Sincronizando tokens do openclaw.json com o Swarm Config (openclaw.yaml)..."
              
-             # Create temp file to store new config
              local tmp_conf=$(mktemp)
-             if jq --arg token "$auth_token" '.gateway.remote.token = $token' "$config_file" > "$tmp_conf"; then
+             # Atualiza auth.token E remote.token
+             if jq --arg token "$env_token" '.gateway.auth.token = $token | .gateway.remote.token = $token' "$config_file" > "$tmp_conf"; then
                  mv "$tmp_conf" "$config_file"
                  
                  # Fix permissions (994:994 is openclaw user in container)
                  chown 994:994 "$config_file"
                  chmod 700 "$config_file"
                  
-                 log_success "Tokens sincronizados."
-                 restart_gateway
+                 log_success "Tokens sincronizados com sucesso."
              else
-                 log_error "Falha ao atualizar token no openclaw.json"
+                 log_error "Falha ao atualizar tokens no JSON."
                  rm -f "$tmp_conf"
              fi
          fi
@@ -2495,9 +2504,35 @@ menu() {
                 read -p "Pressione ENTER para continuar..."
                 ;;
             5)
-                # Acesso direto ao Terminal com banner de ajuda
-                enter_shell
-                read -p "Pressione ENTER para continuar..."
+                while true; do
+                    header
+                    echo -e "${AZUL}=== Menu Avançado & Dispositivos ===${RESET}"
+                    echo ""
+                    echo -e "${VERDE} 1${BRANCO} - Acessar Terminal do Container (CLI)${RESET}"
+                    echo -e "${VERDE} 2${BRANCO} - Gerenciar Dispositivos (Pareamento)${RESET}"
+                    echo -e "${VERDE} 0${BRANCO} - Voltar${RESET}"
+                    echo ""
+                    echo -en "${AMARELO}Opção: ${RESET}"
+                    read -r SUB_OPT
+                    
+                    case $SUB_OPT in
+                        1)
+                            enter_shell
+                            read -p "Pressione ENTER para continuar..."
+                            ;;
+                        2)
+                            approve_device
+                            read -p "Pressione ENTER para continuar..."
+                            ;;
+                        0)
+                            break
+                            ;;
+                        *)
+                            echo "Opção inválida."
+                            sleep 1
+                            ;;
+                    esac
+                done
                 ;;
             6)
                 tool_view_logs
